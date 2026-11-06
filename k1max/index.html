@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K1 Max Dilimleyici</title>
+<meta name="description" content="Creality K1 Max için hazır ayarlı, tarayıcıda çalışan STL dilimleyici.">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.min.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="logo">K1</span><div><strong>K1 Max Dilimleyici</strong><small>Creality K1 Max · 300×300×300 · 0.4 nozul</small></div></div>
+  <div class="top-actions">
+    <label class="btn" for="file">STL Aç<input id="file" type="file" accept=".stl" hidden></label>
+    <button class="btn" id="demo">Örnek model</button>
+    <button class="btn primary" id="slice" disabled>Dilimle</button>
+    <button class="btn accent" id="download" disabled>G-code indir</button>
+  </div>
+</header>
+
+<main>
+  <aside class="panel" id="panel">
+    <section class="card">
+      <h2>Hazır ayar</h2>
+      <label class="row"><span>Filament</span><select id="filament"></select></label>
+      <label class="row"><span>Kalite</span><select id="quality"></select></label>
+      <button class="btn small" id="applyPreset">Hazır ayarı uygula</button>
+      <p class="hint" id="presetHint"></p>
+    </section>
+
+    <section class="card">
+      <h2>Model</h2>
+      <div id="modelInfo" class="hint">Model yüklenmedi. STL dosyasını buraya sürükleyin.</div>
+      <label class="row"><span>Ölçek</span><span class="inp"><input id="scale" type="number" value="100" min="1" max="2000" step="1"><em>%</em></span></label>
+      <div class="btn-row">
+        <button class="btn small" data-rot="x">X 90°</button>
+        <button class="btn small" data-rot="y">Y 90°</button>
+        <button class="btn small" data-rot="z">Z 90°</button>
+        <button class="btn small" id="layflat" title="En geniş düz yüzeyi tablaya yatırır">Yüzeye yatır</button>
+      </div>
+    </section>
+
+    <div id="settings"></div>
+
+    <section class="card">
+      <h2>Profil</h2>
+      <div class="btn-row">
+        <button class="btn small" id="exportProfile">Dışa aktar</button>
+        <label class="btn small" for="importProfile">İçe aktar<input id="importProfile" type="file" accept=".json" hidden></label>
+        <button class="btn small" id="resetProfile">Sıfırla</button>
+      </div>
+      <p class="hint">Ayarlarınız bu tarayıcıda otomatik saklanır.</p>
+    </section>
+  </aside>
+
+  <section class="view">
+    <div id="canvasWrap">
+      <div id="drop" class="drop">STL dosyasını bırakın</div>
+      <div id="busy" class="busy" hidden><div class="bar"><i id="busyBar"></i></div><span id="busyText">Dilimleniyor…</span></div>
+      <div class="legend" id="legend" hidden></div>
+      <div class="viewbtns">
+        <button class="btn small" data-view="iso">3B</button>
+        <button class="btn small" data-view="top">Üst</button>
+        <button class="btn small" data-view="front">Ön</button>
+        <label class="chk"><input type="checkbox" id="showModel" checked> Model</label>
+      </div>
+    </div>
+    <footer class="layerbar" id="layerbar" hidden>
+      <label>Katman <b id="layerNum">0</b> / <span id="layerMax">0</span> · Z <b id="layerZ">0</b> mm</label>
+      <input type="range" id="layer" min="0" max="0" value="0">
+      <label class="chk"><input type="checkbox" id="onlyLayer"> Sadece bu katman</label>
+    </footer>
+    <div class="stats" id="stats"></div>
+  </section>
+</main>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
