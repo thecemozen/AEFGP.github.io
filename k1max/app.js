@@ -364,13 +364,14 @@ $('layflat').addEventListener('click', () => {
 const loader = new STLLoader();
 async function loadFile(file) {
   if (!file) return;
-  if (!/\.stl$/i.test(file.name)) { toast('Şimdilik yalnızca STL dosyaları destekleniyor.', true); return; }
+  if (/\.[a-z0-9]{2,5}$/i.test(file.name) && !/\.stl$/i.test(file.name)) { toast('Şimdilik yalnızca STL dosyaları destekleniyor.', true); return; }
   try {
     const buf = await file.arrayBuffer();
     const geom = loader.parse(buf);
     if (!geom.attributes.position || geom.attributes.position.count < 3) throw new Error('boş');
     setModel(geom, file.name);
     setView('iso');
+    setTab('view');
   } catch (e) { toast('STL okunamadı: ' + e.message, true); }
 }
 $('file').addEventListener('change', e => { loadFile(e.target.files[0]); e.target.value = ''; });
@@ -396,6 +397,7 @@ $('demo').addEventListener('click', () => {
   const merged = mergeGeoms(parts.map(p => p.index ? p.toNonIndexed() : p));
   setModel(merged, 'ornek-model.stl');
   setView('iso');
+  setTab('view');
 });
 function mergeGeoms(list) {
   let n = 0; list.forEach(g => n += g.attributes.position.array.length);
@@ -459,6 +461,7 @@ function onResult(res) {
   $('layerbar').hidden = false; $('download').disabled = false;
   updateLayer();
   buildLegend();
+  setTab('view');
   const st = res.stats;
   $('stats').innerHTML = `Süre: <b>${fmtTime(st.time)}</b> · Filament: <b>${(st.filamentMm / 1000).toFixed(2)} m</b> (<b>${st.grams.toFixed(1)} g</b>) · Katman: <b>${st.layers}</b> · Dilimleme: ${(st.ms / 1000).toFixed(1)} sn`;
 }
@@ -499,12 +502,75 @@ function clearPreview() {
   if (mesh) { mesh.visible = true; $('showModel').checked = true; }
 }
 
+function gcodeName() {
+  const fl = (FILAMENTS[state.filament] || {}).filamentType || 'PLA';
+  return `${modelName}_K1Max_${fl}_${settings.layerHeight}mm_${fmtTime(result.stats.time).replace(/\s/g, '')}.gcode`
+    .replace(/[^\w.\-çğıöşüÇĞİÖŞÜ]/g, '_');
+}
 $('download').addEventListener('click', () => {
   if (!result) return;
-  const fl = (FILAMENTS[state.filament] || {}).filamentType || 'PLA';
-  const name = `${modelName}_K1Max_${fl}_${settings.layerHeight}mm_${fmtTime(result.stats.time).replace(/\s/g, '')}.gcode`;
-  download(new Blob([result.gcode], { type: 'text/plain' }), name);
+  download(new Blob([result.gcode], { type: 'text/plain' }), gcodeName());
 });
+
+// ------------------------------------------------------------ mobil (Android)
+function setTab(tab) {
+  document.body.dataset.tab = tab;
+  document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
+  if (tab === 'view') requestAnimationFrame(resize);
+}
+document.querySelectorAll('.tabs button').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
+setTab('model');
+$('demo2').addEventListener('click', () => $('demo').click());
+$('mSlice').addEventListener('click', () => $('slice').click());
+$('mDownload').addEventListener('click', () => $('download').click());
+// masaüstü düğmelerinin durumunu mobil düğmelere yansıt
+const mirror = () => {
+  $('mSlice').disabled = $('slice').disabled;
+  $('mDownload').disabled = $('download').disabled;
+  $('mShare').disabled = $('download').disabled;
+};
+new MutationObserver(mirror).observe($('slice'), { attributes: true, attributeFilter: ['disabled'] });
+new MutationObserver(mirror).observe($('download'), { attributes: true, attributeFilter: ['disabled'] });
+mirror();
+
+// Android paylaşım menüsü: G-code'u Creality Cloud, Drive, WhatsApp vb. uygulamalara gönderir
+const canShareFiles = (() => {
+  try { return !!(navigator.canShare && navigator.canShare({ files: [new File(['x'], 'a.gcode', { type: 'text/plain' })] })); }
+  catch (e) { return false; }
+})();
+if (canShareFiles) $('mShare').hidden = false;
+$('mShare').addEventListener('click', async () => {
+  if (!result) return;
+  const file = new File([result.gcode], gcodeName(), { type: 'text/plain' });
+  try { await navigator.share({ files: [file], title: gcodeName() }); }
+  catch (e) { if (e.name !== 'AbortError') toast('Paylaşılamadı, İndir düğmesini kullanın.', true); }
+});
+
+$('layerUp').addEventListener('click', () => { const r = $('layer'); r.value = Math.min(+r.max, +r.value + 1); updateLayer(); });
+$('layerDown').addEventListener('click', () => { const r = $('layer'); r.value = Math.max(0, +r.value - 1); updateLayer(); });
+
+// Uygulama olarak yükleme (Android Chrome "Ana ekrana ekle")
+let installEvt = null;
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; $('install').hidden = false; });
+$('install').addEventListener('click', async () => {
+  if (!installEvt) return;
+  installEvt.prompt();
+  await installEvt.userChoice.catch(() => {});
+  installEvt = null; $('install').hidden = true;
+});
+window.addEventListener('appinstalled', () => { $('install').hidden = true; toast('Uygulama yüklendi.'); });
+
+// Çevrimdışı çalışma
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+}
+
+// Paylaşım hedefi / dosya ile açma (Android'de STL dosyasını "Birlikte aç")
+if ('launchQueue' in window) {
+  window.launchQueue.setConsumer(async params => {
+    if (params.files && params.files.length) loadFile(await params.files[0].getFile());
+  });
+}
 
 // ------------------------------------------------------------ yardımcılar
 function download(blob, name) {

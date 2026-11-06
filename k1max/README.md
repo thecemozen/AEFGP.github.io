@@ -11,6 +11,13 @@ Creality K1 Max için tarayıcıda çalışan basit bir STL → G-code dilimleyi
 - Katman katman 3B önizleme, süre ve filament tahmini
 - Model döndürme, ölçekleme, "yüzeye yatır"
 
+## Android'de kullanım
+1. Telefonda Chrome ile sayfayı açın.
+2. **Uygulamayı yükle** düğmesine (ya da Chrome menüsü → *Ana ekrana ekle*) dokunun. Uygulama ana ekrana kurulur ve tam ekran açılır.
+3. İlk açılıştan sonra internet olmadan da çalışır.
+4. **Model** sekmesinden STL açın, **Dilimle**'ye dokunun, **Önizleme**'de katmanlara bakın.
+5. **İndir** G-code'u İndirilenler klasörüne kaydeder; **Paylaş** dosyayı Creality Cloud, Drive, WhatsApp gibi uygulamalara gönderir. Sonra USB bellekle ya da Creality Cloud üzerinden yazıcıya aktarın.
+
 ## Sınırlamalar
 - **Destek (support) üretmez.** Büyük çıkıntılı modeller için OrcaSlicer / Creality Print kullanın veya modeli desteksiz basılacak şekilde yönlendirin.
 - Köprü algılama, ironing, çoklu nesne ve 3MF desteği yoktur.

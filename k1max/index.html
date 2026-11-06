@@ -2,7 +2,12 @@
 <html lang="tr">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f9d55">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
 <title>K1 Max Dilimleyici</title>
 <meta name="description" content="Creality K1 Max için hazır ayarlı, tarayıcıda çalışan STL dilimleyici.">
 <link rel="stylesheet" href="style.css">
@@ -16,8 +21,9 @@
 <body>
 <header class="top">
   <div class="brand"><span class="logo">K1</span><div><strong>K1 Max Dilimleyici</strong><small>Creality K1 Max · 300×300×300 · 0.4 nozul</small></div></div>
+  <button class="btn small" id="install" hidden>Uygulamayı yükle</button>
   <div class="top-actions">
-    <label class="btn" for="file">STL Aç<input id="file" type="file" accept=".stl" hidden></label>
+    <label class="btn" for="file">STL Aç<input id="file" type="file" accept=".stl,model/stl,model/x.stl-binary,application/sla,application/vnd.ms-pki.stl,application/octet-stream" hidden></label>
     <button class="btn" id="demo">Örnek model</button>
     <button class="btn primary" id="slice" disabled>Dilimle</button>
     <button class="btn accent" id="download" disabled>G-code indir</button>
@@ -26,7 +32,7 @@
 
 <main>
   <aside class="panel" id="panel">
-    <section class="card">
+    <section class="card" data-sec="model">
       <h2>Hazır ayar</h2>
       <label class="row"><span>Filament</span><select id="filament"></select></label>
       <label class="row"><span>Kalite</span><select id="quality"></select></label>
@@ -34,9 +40,13 @@
       <p class="hint" id="presetHint"></p>
     </section>
 
-    <section class="card">
+    <section class="card" data-sec="model">
       <h2>Model</h2>
-      <div id="modelInfo" class="hint">Model yüklenmedi. STL dosyasını buraya sürükleyin.</div>
+      <div id="modelInfo" class="hint">Model yüklenmedi. STL dosyasını açın ya da buraya sürükleyin.</div>
+      <div class="btn-row mobile-only">
+        <label class="btn small" for="file">STL Aç</label>
+        <button class="btn small" id="demo2">Örnek model</button>
+      </div>
       <label class="row"><span>Ölçek</span><span class="inp"><input id="scale" type="number" value="100" min="1" max="2000" step="1"><em>%</em></span></label>
       <div class="btn-row">
         <button class="btn small" data-rot="x">X 90°</button>
@@ -46,9 +56,9 @@
       </div>
     </section>
 
-    <div id="settings"></div>
+    <div id="settings" data-sec="settings"></div>
 
-    <section class="card">
+    <section class="card" data-sec="settings">
       <h2>Profil</h2>
       <div class="btn-row">
         <button class="btn small" id="exportProfile">Dışa aktar</button>
@@ -73,12 +83,27 @@
     </div>
     <footer class="layerbar" id="layerbar" hidden>
       <label>Katman <b id="layerNum">0</b> / <span id="layerMax">0</span> · Z <b id="layerZ">0</b> mm</label>
+      <button class="btn small step" id="layerDown" aria-label="Bir katman aşağı">−</button>
       <input type="range" id="layer" min="0" max="0" value="0">
+      <button class="btn small step" id="layerUp" aria-label="Bir katman yukarı">+</button>
       <label class="chk"><input type="checkbox" id="onlyLayer"> Sadece bu katman</label>
     </footer>
     <div class="stats" id="stats"></div>
   </section>
 </main>
+
+<div class="mobilebar">
+  <div class="actions">
+    <button class="btn primary" id="mSlice" disabled>Dilimle</button>
+    <button class="btn accent" id="mDownload" disabled>İndir</button>
+    <button class="btn" id="mShare" disabled hidden>Paylaş</button>
+  </div>
+  <nav class="tabs">
+    <button data-tab="model" class="on">Model</button>
+    <button data-tab="settings">Ayarlar</button>
+    <button data-tab="view">Önizleme</button>
+  </nav>
+</div>
 
 <script type="module" src="app.js"></script>
 </body>
