@@ -1,0 +1,463 @@
+<title>Dolgu Atölyesi</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..125,500..800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<script src="https://cdn.jsdelivr.net/npm/clipper-lib@6.4.2/clipper.js"></script>
+<style>
+/* Düzen: atölye defteri — üstte tek katman kontrolü, altında desen kartları ızgarası, sonda öne çıkan fikir */
+:root {
+  --paper: #eef0ec;      /* sayfa: hafif yeşilimsi gri, tabla çeliği gibi */
+  --sheet: #f8f9f6;      /* kart yüzeyi */
+  --ink: #1d2320;        /* metin */
+  --muted: #5d6762;      /* ikincil metin */
+  --rule: #d5dad5;       /* çizgiler */
+  --plate: #2f3437;      /* tabla (canvas zemini) */
+  --wall: #e8ece9;       /* duvar halkaları */
+  --fil: #ff8a3d;        /* filament (dolgu çizgisi) */
+  --fil2: #4fb0ff;       /* ikinci aile */
+  --hot: #ff4f5e;        /* kesişme noktası */
+  --accent: #1f9d55;     /* uygulamanın yeşili */
+  --display: "Archivo", "Arial Narrow", system-ui, sans-serif;
+  --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #161a19; --sheet: #1e2321; --ink: #e6ebe8; --muted: #9aa49f; --rule: #2d3431;
+    --plate: #262b2e; --wall: #cfd6d2; --fil: #ff9a52; --fil2: #6cbcff; --hot: #ff6b76; --accent: #35c472;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #161a19; --sheet: #1e2321; --ink: #e6ebe8; --muted: #9aa49f; --rule: #2d3431;
+  --plate: #262b2e; --wall: #cfd6d2; --fil: #ff9a52; --fil2: #6cbcff; --hot: #ff6b76; --accent: #35c472;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--paper); color: var(--ink); font-family: var(--body); font-size: 15px; line-height: 1.5;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 1180px; margin: 0 auto; padding-block: 28px 56px; display: grid; gap: 28px; }
+header { display: grid; gap: 10px; }
+.eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+h1 { font-family: var(--display); font-stretch: 112%; font-weight: 800; font-size: clamp(30px, 5vw, 52px); line-height: 1.02; margin: 0; text-wrap: balance; }
+.lede { max-width: 66ch; color: var(--muted); margin: 0; }
+.controls {
+  display: flex; flex-wrap: wrap; gap: 14px 22px; align-items: center; padding: 14px 16px; background: var(--sheet);
+  border: 1px solid var(--rule); border-radius: 12px; position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
+}
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--paper); }
+.controls label { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.controls input[type=range] { width: min(260px, 50vw); accent-color: var(--accent); }
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+button.play {
+  font: 600 14px var(--body); border: 1px solid var(--accent); color: var(--accent); background: transparent;
+  border-radius: 999px; padding: 6px 16px; cursor: pointer;
+}
+button.play:focus-visible, .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.seg { display: inline-flex; border: 1px solid var(--rule); border-radius: 999px; overflow: hidden; }
+.seg button { font: 500 13px var(--body); padding: 6px 12px; border: 0; background: transparent; color: var(--muted); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+@media (max-width: 760px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+.card { background: var(--sheet); border: 1px solid var(--rule); border-radius: 14px; padding: 14px; display: grid; gap: 10px; min-width: 0; }
+.card.star { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.card h2 { font-family: var(--display); font-stretch: 100%; font-weight: 700; font-size: 19px; margin: 0; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.tag { font-family: var(--mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--rule); color: var(--muted); }
+.tag.new { color: var(--accent); border-color: var(--accent); }
+canvas { width: 100%; aspect-ratio: 2.25 / 1; display: block; border-radius: 10px; background: var(--plate); max-width: 100%; }
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+@media (max-width: 420px) { .stats { grid-template-columns: repeat(2, 1fr); } }
+.stats div { border-top: 1px solid var(--rule); padding-top: 6px; }
+.stats small { display: block; font-size: 11px; color: var(--muted); letter-spacing: .03em; }
+.stats b { font-family: var(--mono); font-weight: 500; font-size: 15px; font-variant-numeric: tabular-nums; }
+.stats b.bad { color: var(--hot); }
+.stats b.good { color: var(--accent); }
+.card p { margin: 0; font-size: 14px; color: var(--muted); }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 13px; color: var(--muted); }
+.legend i { display: inline-block; width: 18px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+.legend i.dot { width: 8px; height: 8px; border-radius: 50%; }
+section.idea { background: var(--sheet); border: 1px solid var(--rule); border-radius: 14px; padding: 22px; display: grid; gap: 14px; }
+section.idea h2 { font-family: var(--display); font-stretch: 112%; font-weight: 800; font-size: clamp(22px, 3.2vw, 32px); margin: 0; text-wrap: balance; }
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px; }
+.cols div { min-width: 0; }
+.cols h3 { font-size: 15px; margin: 0 0 4px; }
+.cols p, .cols li { font-size: 14px; color: var(--muted); margin: 0; }
+.cols ol { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.note { font-size: 12px; color: var(--muted); font-family: var(--mono); }
+
+section.bench { display: grid; gap: 18px; }
+section.bench h2 { font-family: var(--display); font-stretch: 112%; font-weight: 800; font-size: clamp(22px, 3.2vw, 32px); margin: 0; text-wrap: balance; }
+.bench .lede { max-width: 72ch; }
+.chart { background: var(--sheet); border: 1px solid var(--rule); border-radius: 14px; padding: 16px; display: grid; gap: 10px; }
+.chart h3 { margin: 0; font-size: 15px; }
+.chart .sub { font-size: 13px; color: var(--muted); margin: 0; }
+.bars { display: grid; gap: 8px; }
+.bar { display: grid; grid-template-columns: minmax(120px, 230px) 1fr; gap: 10px; align-items: center; }
+.bar .lbl { font-size: 13px; min-width: 0; }
+.bar .lbl.best { font-weight: 600; color: var(--accent); }
+.track { position: relative; height: 22px; border-radius: 4px; background: linear-gradient(90deg, transparent calc(50% - 0.5px), var(--rule) calc(50% - 0.5px), var(--rule) calc(50% + 0.5px), transparent calc(50% + 0.5px)); }
+.track i { position: absolute; top: 3px; height: 16px; border-radius: 3px; }
+.track i.neg { background: var(--accent); }
+.track i.pos { background: var(--hot); }
+.track span { position: absolute; top: 2px; font: 500 12px var(--mono); font-variant-numeric: tabular-nums; color: var(--ink); white-space: nowrap; }
+.tablewrap { overflow-x: auto; background: var(--sheet); border: 1px solid var(--rule); border-radius: 14px; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; min-width: 760px; }
+th, td { padding: 8px 10px; text-align: right; border-bottom: 1px solid var(--rule); font-variant-numeric: tabular-nums; }
+th:first-child, td:first-child { text-align: left; }
+thead th { font-weight: 600; color: var(--muted); font-size: 12px; }
+td.min { color: var(--accent); font-weight: 600; }
+td.mono { font-family: var(--mono); }
+.findings { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+.findings div { background: var(--sheet); border: 1px solid var(--rule); border-radius: 12px; padding: 14px; min-width: 0; }
+.findings b { display: block; font-family: var(--display); font-size: 26px; font-stretch: 110%; }
+.findings p { margin: 4px 0 0; font-size: 13px; color: var(--muted); }
+@media (max-width: 520px) { .bar { grid-template-columns: 1fr; gap: 4px; } }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">K1 Max Dilimleyici · dolgu araştırması</div>
+    <h1>Dolguda yeni bir yol: on desen, tek parça</h1>
+    <p class="lede">On desen aynı örnek parçada, gerçek çizgilerle çizildi: 120 × 50 mm, iki delikli bir braket, 2 duvar, ortalama %20 yoğunluk. Gyroid dışındaki desenler katman başına aşağı yukarı aynı miktarda filament kullanıyor.
+      Kaydırıcıyla katmanlar arasında gezin. "Üst üste" görünümü son 12 katmanı birlikte gösterir; sarmalın nasıl döndüğü orada görünür.</p>
+  </header>
+
+  <div class="controls" role="group" aria-label="Görünüm kontrolleri">
+    <label for="layer">Katman <span class="num" id="layerOut">1</span>
+      <input type="range" id="layer" min="1" max="48" value="1"></label>
+    <button class="play" id="play" type="button">Oynat</button>
+    <div class="seg" role="group" aria-label="Görünüm">
+      <button type="button" id="vOne" aria-pressed="true">Tek katman</button>
+      <button type="button" id="vStack" aria-pressed="false">Üst üste (12)</button>
+    </div>
+    <div class="legend">
+      <span><i style="background:var(--fil)"></i>dolgu</span>
+      <span><i style="background:var(--fil2)"></i>ikinci yön</span>
+      <span><i class="dot" style="background:var(--hot)"></i>aynı katmanda kesişme</span>
+    </div>
+  </div>
+
+  <div class="grid" id="grid"></div>
+
+
+  <section class="bench" id="sure">
+    <div class="eyebrow">Süre testi · 5 model · K1 Max · PLA · %15 dolgu</div>
+    <h2>Hangi dolgu baskıyı kısaltıyor?</h2>
+    <p class="lede">Beş tipik model, dilimleyicimizde aynı ayarlarla her desenle dilimlendi. Süreler, Klipper'ın köşe hızı (square corner velocity) ve ivme kurallarıyla hesaplanan tahminlerdir; yazıcıda ölçülmedi. Yüzdeler ızgara dolguya göredir.</p>
+    <div class="findings">
+      <div><b>−%33</b><p>"Hızlı + tek hat + 2 katta bir" ile dolgunun kendi süresi (5 model ortalaması).</p></div>
+      <div><b>−%4,3</b><p>Aynı ayarla toplam baskı süresi; en iyi sonuç telefon standında −%8. Sürenin çoğu duvarlarda geçiyor.</p></div>
+      <div><b>×0,44</b><p>Geri çekme sayısı: yarıdan fazla azalıyor, ip çekme ve sızıntı riski de azalır.</p></div>
+    </div>
+    <div class="chart">
+      <h3>Dolgu süresindeki değişim</h3>
+      <p class="sub">5 modelin ortalaması. Yeşil: ızgaradan hızlı, kırmızı: yavaş. Ölçek ±60%; daha uzun çubuklar kenarda kesilir.</p>
+      <div class="bars" id="barsInfill"></div>
+    </div>
+    <div class="chart">
+      <h3>Toplam baskı süresindeki değişim</h3>
+      <p class="sub">5 modelin ortalaması. Ölçek ±10%.</p>
+      <div class="bars" id="barsTotal"></div>
+    </div>
+    <div class="tablewrap">
+      <table id="benchTable" aria-label="Model ve desene göre toplam baskı süresi"></table>
+    </div>
+    <p class="note">Gyroid: bizim uygulamamız eğriyi çok sayıda kısa parçaya böldüğü için yavaş çıkıyor; OrcaSlicer'daki gyroid bu kadar yavaş değildir, bu sonucu gyroid'e genelleştirmeyin. "Tek hat" bağlantıları nedeniyle ~%5 fazla filament kullanır; "2 katta bir" ile fark %2'ye iner. Izgaranın kesişmeleri süre hesabında cezalandırılmıyor, ama hızlı baskıda nozul çarpması ve titreşim yaratır.</p>
+  </section>
+
+  <section class="idea">
+    <div class="eyebrow">Önerilen yeni desen</div>
+    <h2>Sarmal + kenar yoğun: kesişmesiz, hızlı ve kabuğa yaslanan dolgu</h2>
+    <div class="cols">
+      <div>
+        <h3>Nasıl çalışır</h3>
+        <ol>
+          <li>Her katmanda çizgiler tek yönde atılır, birbirini hiç kesmez.</li>
+          <li>Her katmanda yön 15° döner; 12 katmanda tam bir yarım tur tamamlanır.</li>
+          <li>Duvara yakın 6 mm'lik şerit yaklaşık 1,7 kat sık, iç kısım 2,6 kat seyrek basılır; toplam filament ızgarayla aynı kalır.</li>
+        </ol>
+      </div>
+      <div>
+        <h3>Neden umut verici</h3>
+        <p>Nozul hiçbir çizgiye çarpmaz, uzun düz çizgiler K1 Max'in ivmesinden tam yararlanır. Eğilme dayanımı en çok dış kabuğa yakın malzemeden geldiği için malzeme oraya toplanır. Dönen katmanlar, mantis karidesinin kıskacındaki gibi çatlağın tek yönde ilerlemesini zorlaştırır.</p>
+      </div>
+      <div>
+        <h3>Nasıl kanıtlarız</h3>
+        <p>Aynı gramda üç çubuk (100 × 20 × 6 mm): ızgara, gyroid ve yeni desen. Süre ve gram dilimleyiciden okunur, sonra çubuklar iki destek arasında ortadan yüklenerek kırılana kadar karşılaştırılır.</p>
+      </div>
+    </div>
+    <p class="note">Kartlardaki sayılar bu sayfadaki örnek parça için tek katmanda hesaplandı; baskı süresi ve dayanım tahmini değildir.</p>
+  </section>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var CL = window.ClipperLib;
+  var S = 100; // Clipper ölçeği (1 birim = 0,01 mm)
+  var W = 120, H = 50, LW = 0.45, DENS = 0.20;
+
+  // ---------------------------------------------------------- parça geometrisi
+  function roundRect(x, y, w, h, r, n) {
+    var pts = [], cs = [[x + w - r, y + r, -90], [x + w - r, y + h - r, 0], [x + r, y + h - r, 90], [x + r, y + r, 180]];
+    cs.forEach(function (c) { for (var i = 0; i <= n; i++) { var a = (c[2] + 90 * i / n) * Math.PI / 180; pts.push({ X: Math.round((c[0] + r * Math.cos(a)) * S), Y: Math.round((c[1] + r * Math.sin(a)) * S) }); } });
+    return pts;
+  }
+  function circle(cx, cy, r, n, rev) {
+    var pts = [];
+    for (var i = 0; i < n; i++) { var a = (rev ? -1 : 1) * i / n * Math.PI * 2; pts.push({ X: Math.round((cx + r * Math.cos(a)) * S), Y: Math.round((cy + r * Math.sin(a)) * S) }); }
+    return pts;
+  }
+  var outline = [roundRect(0, 0, W, H, 6, 10), circle(20, 25, 6, 48, true), circle(100, 25, 6, 48, true)];
+
+  function offset(paths, d) {
+    var co = new CL.ClipperOffset(2, 0.25);
+    co.AddPaths(paths, CL.JoinType.jtRound, CL.EndType.etClosedPolygon);
+    var out = new CL.Paths(); co.Execute(out, d * S); return out;
+  }
+  function diff(a, b) {
+    var c = new CL.Clipper(); c.AddPaths(a, CL.PolyType.ptSubject, true); c.AddPaths(b, CL.PolyType.ptClip, true);
+    var out = new CL.Paths(); c.Execute(CL.ClipType.ctDifference, out, CL.PolyFillType.pftNonZero, CL.PolyFillType.pftNonZero); return out;
+  }
+  var walls = [offset(outline, -LW / 2), offset(outline, -LW * 1.5)];
+  function union(a) { var c = new CL.Clipper(); c.AddPaths(a, CL.PolyType.ptSubject, true); var o = new CL.Paths(); c.Execute(CL.ClipType.ctUnion, o, CL.PolyFillType.pftNonZero, CL.PolyFillType.pftNonZero); return o; }
+  function inter(a, b) { var c = new CL.Clipper(); c.AddPaths(a, CL.PolyType.ptSubject, true); c.AddPaths(b, CL.PolyType.ptClip, true); var o = new CL.Paths(); c.Execute(CL.ClipType.ctIntersection, o, CL.PolyFillType.pftNonZero, CL.PolyFillType.pftNonZero); return o; }
+  var fillArea = offset(outline, -LW * 2.2);
+  var inner = offset(fillArea, -6);           // seyrek iç bölge
+  var band = diff(fillArea, inner);            // duvara yakın şerit
+  var holeRing = inter(union([circle(20, 25, 13, 64), circle(100, 25, 13, 64)]), offset(outline, -LW * 2.2)); // delik çevresi
+  var holeRest = diff(fillArea, holeRing);
+
+  function clipOpen(curves, region) {
+    if (!curves.length || !region.length) return [];
+    var c = new CL.Clipper();
+    c.AddPaths(curves, CL.PolyType.ptSubject, false); c.AddPaths(region, CL.PolyType.ptClip, true);
+    var tree = new CL.PolyTree();
+    c.Execute(CL.ClipType.ctIntersection, tree, CL.PolyFillType.pftNonZero, CL.PolyFillType.pftNonZero);
+    return CL.Clipper.OpenPathsFromPolyTree(tree).filter(function (p) { return p.length > 1; })
+      .map(function (p) { return p.map(function (q) { return [q.X / S, q.Y / S]; }); });
+  }
+  // paralel çizgiler (açı derece, aralık mm)
+  function lines(region, spacing, angle, phase) {
+    var a = angle * Math.PI / 180, ca = Math.cos(a), sa = Math.sin(a);
+    var R = Math.hypot(W, H), cx = W / 2, cy = H / 2, out = [];
+    for (var t = -R + (phase || 0) * spacing; t <= R; t += spacing) {
+      var px = cx - sa * t, py = cy + ca * t;
+      out.push([{ X: Math.round((px - ca * R) * S), Y: Math.round((py - sa * R) * S) }, { X: Math.round((px + ca * R) * S), Y: Math.round((py + sa * R) * S) }]);
+    }
+    return clipOpen(out, region);
+  }
+  function gyroid(region, spacing, z) {
+    var period = spacing * 2, k = 2 * Math.PI / period, sz = Math.sin(z * k), cz = Math.cos(z * k), step = 0.4, curves = [];
+    for (var br = 0; br < 2; br++) for (var n = -2; n <= Math.ceil(H / period) + 2; n++) {
+      var cur = null, prev = null;
+      for (var x = -1; x <= W + 1; x += step) {
+        var xx = x * k, sx = Math.sin(xx), Rr = Math.sqrt(sx * sx + cz * cz), rhs = -sz * Math.cos(xx);
+        if (Rr < 1e-9 || Math.abs(rhs) > Rr) { if (cur && cur.length > 1) curves.push(cur); cur = null; prev = null; continue; }
+        var as = Math.asin(rhs / Rr), y = ((br ? Math.PI - as : as) - Math.atan2(cz, sx) + 2 * Math.PI * n) / k;
+        if (prev !== null && Math.abs(y - prev) > period * 0.4) { if (cur && cur.length > 1) curves.push(cur); cur = null; }
+        (cur = cur || []).push({ X: Math.round(x * S), Y: Math.round(y * S) }); prev = y;
+      }
+      if (cur && cur.length > 1) curves.push(cur);
+    }
+    return clipOpen(curves, region);
+  }
+
+  // Tek hat: çizgileri uç uca zikzakla bağla (yakın uçlar arasına bağlantı)
+  function joinZigzag(ls, maxGap) {
+    var left = ls.slice(), out = [];
+    while (left.length) {
+      var cur = left.shift().slice();
+      var grew = true;
+      while (grew) {
+        grew = false;
+        var end = cur[cur.length - 1], best = -1, bd = Infinity, flip = false;
+        for (var i = 0; i < left.length; i++) {
+          var p = left[i], d1 = Math.hypot(p[0][0] - end[0], p[0][1] - end[1]), d2 = Math.hypot(p[p.length - 1][0] - end[0], p[p.length - 1][1] - end[1]);
+          if (d1 < bd) { bd = d1; best = i; flip = false; }
+          if (d2 < bd) { bd = d2; best = i; flip = true; }
+        }
+        if (best >= 0 && bd <= maxGap) {
+          var nx = left.splice(best, 1)[0];
+          cur = cur.concat(flip ? nx.slice().reverse() : nx);
+          grew = true;
+        }
+      }
+      out.push(cur);
+    }
+    return out;
+  }
+
+  // ---------------------------------------------------------- desenler: her biri bir katman için {a: [...], b: [...]} döndürür
+  var sp = LW / DENS; // tek yönlü desende çizgi aralığı
+  var PATTERNS = [
+    { id: 'grid', name: 'Izgara', tag: 'yaygın', text: 'İki yön aynı katmanda basılır. Her kesişmede çizgi kendi üstüne biner; hızlı baskıda nozul bu tümseklere çarpar.',
+      layer: function () { return { a: lines(fillArea, sp * 2, 45), b: lines(fillArea, sp * 2, -45) }; } },
+    { id: 'gyroid', name: 'Gyroid', tag: 'yaygın', text: 'Kesişmesiz ve her yönde dayanıklı. Ama sürekli eğri: çok sayıda kısa hareket ve yavaşlama demek.',
+      layer: function (li) { return { a: gyroid(fillArea, sp, li * 0.2) }; } },
+    { id: 'helix', name: 'Sarmal', tag: 'yeni', text: 'Her katman tek yön, kesişme yok. Yön her katmanda 15° döner; birkaç katmanda tüm yönler kapsanır.',
+      layer: function (li) { return { a: lines(fillArea, sp, (li * 15) % 180) }; } },
+    { id: 'graded', name: 'Kenar yoğun', tag: 'yeni', text: 'Duvara yakın 6 mm sık, içi seyrek; toplam filament ızgarayla aynı. Malzeme, eğilmeyi en çok karşılayan bölgeye toplanır.',
+      layer: function (li) { var ang = li % 2 ? 45 : -45; return { a: lines(band, sp * 0.6, ang).concat(lines(inner, sp * 2.6, ang)) }; } },
+    { id: 'helixgraded', name: 'Sarmal + kenar yoğun', tag: 'önerilen', star: true, text: 'İkisinin birleşimi: kesişmesiz, uzun düz çizgiler ve kabuğa yaslanan malzeme.',
+      layer: function (li) { var ang = (li * 15) % 180; return { a: lines(band, sp * 0.6, ang).concat(lines(inner, sp * 2.6, ang)) }; } },
+    { id: 'load', name: 'Yüke göre', tag: 'yeni', text: 'Çizgiler çoğunlukla parçanın uzun ekseninde; araya çapraz bağ katmanları girer. Uzun, ince parçalar için.',
+      layer: function (li) { var m = li % 4; var ang = m === 3 ? 90 : (m === 1 ? 12 : (m === 2 ? -12 : 0)); return { a: lines(fillArea, sp, ang) }; } },
+    { id: 'golden', name: 'Altın açı', tag: 'yeni', text: 'Sarmalın kardeşi: yön her katmanda 137,5° döner. Hiçbir yön tekrarlanmaz, az katmanda bütün yönler kapsanır.',
+      layer: function (li) { return { a: lines(fillArea, sp, (li * 137.508) % 180) }; } },
+    { id: 'oneline', name: 'Tek hat', tag: 'yeni', text: 'Yakın çizgiler zikzakla tek hatta bağlanır. Boş hareket ve geri çekme yarıdan fazla azalır (delikler hattı böldüğü için sıfır olmaz); sızıntı ve ip çekme azalır.',
+      layer: function (li) { return { a: joinZigzag(lines(fillArea, sp, (li * 15) % 180), sp * 2.2) }; } },
+    { id: 'holes', name: 'Delik takviyeli', tag: 'yeni', text: 'Vida deliklerinin çevresi sık, gerisi seyrek; toplam filament aynı. Parçalar çoğunlukla delik çevresinden çatlar.',
+      layer: function (li) { var ang = (li * 15) % 180; return { a: lines(holeRing, sp * 0.45, ang).concat(lines(holeRest, sp * 1.24, ang)) }; } },
+    { id: 'interlock', name: 'Kilitli katman', tag: 'yeni', text: 'Aynı yönde iki katman, ikincisi yarım aralık kaymış: her çizgi alttakilerin arasındaki oluğa oturur. Sonra yön 60° döner.',
+      layer: function (li) { var ang = Math.floor(li / 2) * 60 % 180; return { a: lines(fillArea, sp, ang, li % 2 ? 0.5 : 0) }; } },
+  ];
+
+  // ---------------------------------------------------------- ölçümler
+  function length(paths) { var L = 0; paths.forEach(function (p) { for (var i = 1; i < p.length; i++) L += Math.hypot(p[i][0] - p[i - 1][0], p[i][1] - p[i - 1][1]); }); return L; }
+  function segs(paths) { var s = []; paths.forEach(function (p) { for (var i = 1; i < p.length; i++) s.push([p[i - 1], p[i]]); }); return s; }
+  function crossings(A, B) {
+    var a = segs(A), b = segs(B), pts = [];
+    for (var i = 0; i < a.length; i++) for (var j = 0; j < b.length; j++) {
+      var p = a[i][0], r = [a[i][1][0] - p[0], a[i][1][1] - p[1]], q = b[j][0], s = [b[j][1][0] - q[0], b[j][1][1] - q[1]];
+      var den = r[0] * s[1] - r[1] * s[0]; if (Math.abs(den) < 1e-9) continue;
+      var t = ((q[0] - p[0]) * s[1] - (q[1] - p[1]) * s[0]) / den, u = ((q[0] - p[0]) * r[1] - (q[1] - p[1]) * r[0]) / den;
+      if (t > 0 && t < 1 && u > 0 && u < 1) pts.push([p[0] + t * r[0], p[1] + t * r[1]]);
+    }
+    return pts;
+  }
+  // yön değişimi: her çizgi parçası başlangıcı ve eğride 20°'den büyük dönüşler
+  function turns(paths) {
+    var n = 0;
+    paths.forEach(function (p) {
+      n++;
+      for (var i = 2; i < p.length; i++) {
+        var a1 = Math.atan2(p[i - 1][1] - p[i - 2][1], p[i - 1][0] - p[i - 2][0]), a2 = Math.atan2(p[i][1] - p[i - 1][1], p[i][0] - p[i - 1][0]);
+        var d = Math.abs(a2 - a1); if (d > Math.PI) d = 2 * Math.PI - d;
+        if (d > 0.35) n++;
+      }
+    });
+    return n;
+  }
+
+  // ---------------------------------------------------------- çizim
+  var cache = {};
+  function get(pat, li) { var k = pat.id + ':' + li; if (!cache[k]) cache[k] = pat.layer(li); return cache[k]; }
+  function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+
+  var grid = document.getElementById('grid');
+  var cards = PATTERNS.map(function (pat) {
+    var el = document.createElement('article');
+    el.className = 'card' + (pat.star ? ' star' : '');
+    el.innerHTML = '<h2>' + pat.name + ' <span class="tag' + (pat.tag !== 'yaygın' ? ' new' : '') + '">' + pat.tag + '</span></h2>' +
+      '<canvas role="img" aria-label="' + pat.name + ' dolgusu, örnek parça üzerinde"></canvas>' +
+      '<div class="stats"><div><small>çizgi / katman</small><b data-k="len">–</b></div><div><small>kesişme</small><b data-k="x">–</b></div><div><small>yön değişimi</small><b data-k="t">–</b></div><div><small>boş hareket</small><b data-k="tr">–</b></div></div>' +
+      '<p>' + pat.text + '</p>';
+    grid.appendChild(el);
+    return { pat: pat, el: el, cv: el.querySelector('canvas') };
+  });
+
+  var state = { layer: 1, stack: false };
+  function draw() {
+    var C = { plate: css('--plate'), wall: css('--wall'), fil: css('--fil'), fil2: css('--fil2'), hot: css('--hot') };
+    cards.forEach(function (c) {
+      var cv = c.cv, dpr = Math.min(2, window.devicePixelRatio || 1);
+      var w = cv.clientWidth, h = cv.clientHeight; if (!w) return;
+      cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+      var g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+      g.fillStyle = C.plate; g.fillRect(0, 0, w, h);
+      var pad = 10, sc = Math.min((w - 2 * pad) / W, (h - 2 * pad) / H), ox = (w - W * sc) / 2, oy = (h - H * sc) / 2;
+      var X = function (x) { return ox + x * sc; }, Y = function (y) { return oy + (H - y) * sc; };
+      function stroke(paths, color, width, alpha) {
+        g.strokeStyle = color; g.globalAlpha = alpha; g.lineWidth = width; g.lineCap = 'round'; g.lineJoin = 'round';
+        paths.forEach(function (p) { g.beginPath(); p.forEach(function (q, i) { i ? g.lineTo(X(q[0]), Y(q[1])) : g.moveTo(X(q[0]), Y(q[1])); }); g.stroke(); });
+        g.globalAlpha = 1;
+      }
+      var li = state.layer - 1;
+      var lw = Math.max(1, LW * sc);
+      if (state.stack) {
+        for (var k = 11; k >= 0; k--) {
+          var L = li - k; if (L < 0) continue;
+          var d = get(c.pat, L);
+          var al = 0.18 + 0.82 * (1 - k / 12);
+          stroke(d.a, C.fil, lw * 0.8, al * 0.8);
+          if (d.b) stroke(d.b, C.fil2, lw * 0.8, al * 0.8);
+        }
+      } else {
+        var dd = get(c.pat, li);
+        stroke(dd.a, C.fil, lw, 1);
+        if (dd.b) stroke(dd.b, C.fil2, lw, 1);
+      }
+      walls.forEach(function (wp) { stroke(wp.map(function (p) { return p.map(function (q) { return [q.X / S, q.Y / S]; }).concat([[p[0].X / S, p[0].Y / S]]); }), C.wall, lw, 0.9); });
+      // ölçümler (her zaman geçerli katman için)
+      var cur = get(c.pat, li);
+      var all = cur.a.concat(cur.b || []);
+      var xs = cur.b ? crossings(cur.a, cur.b) : [];
+      if (!state.stack && xs.length) { g.fillStyle = C.hot; xs.forEach(function (p) { g.beginPath(); g.arc(X(p[0]), Y(p[1]), Math.max(1.8, lw * 0.9), 0, Math.PI * 2); g.fill(); }); }
+      var st = c.el.querySelectorAll('.stats b');
+      st[0].textContent = Math.round(length(all)) + ' mm';
+      st[1].textContent = xs.length; st[1].className = xs.length ? 'bad' : 'good';
+      st[2].textContent = turns(all);
+      st[3].textContent = all.length;
+    });
+  }
+
+  var layerEl = document.getElementById('layer'), out = document.getElementById('layerOut');
+  layerEl.addEventListener('input', function () { state.layer = +layerEl.value; out.textContent = state.layer; draw(); });
+  var vOne = document.getElementById('vOne'), vStack = document.getElementById('vStack');
+  function setView(stack) {
+    state.stack = stack; vOne.setAttribute('aria-pressed', String(!stack)); vStack.setAttribute('aria-pressed', String(stack));
+    if (stack && state.layer < 12) { state.layer = 12; layerEl.value = 12; out.textContent = 12; }
+    draw();
+  }
+  vOne.addEventListener('click', function () { setView(false); });
+  vStack.addEventListener('click', function () { setView(true); });
+  var timer = null, playBtn = document.getElementById('play');
+  playBtn.addEventListener('click', function () {
+    if (timer) { clearInterval(timer); timer = null; playBtn.textContent = 'Oynat'; return; }
+    playBtn.textContent = 'Durdur';
+    timer = setInterval(function () { state.layer = state.layer % 48 + 1; layerEl.value = state.layer; out.textContent = state.layer; draw(); }, 320);
+  });
+  window.addEventListener('resize', draw);
+  if (window.matchMedia) matchMedia('(prefers-color-scheme: dark)').addEventListener('change', draw);
+  new MutationObserver(draw).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  state.layer = 12; layerEl.value = 12; out.textContent = 12;
+  setView(true);
+  draw();
+})();
+
+(function () {
+  var DATA = {"Kalibrasyon küpü (20 mm)": {"Izgara": {"t": 7.5, "f": 5.1, "g": 3.1, "r": 949}, "Gyroid": {"t": 8.1, "f": 8.5, "g": 3.1, "r": 1072}, "Doğrusal": {"t": 7.5, "f": 5.1, "g": 3.1, "r": 949}, "Sarmal": {"t": 7.6, "f": 5.0, "g": 3.1, "r": 900}, "Hızlı": {"t": 7.7, "f": 4.8, "g": 3.3, "r": 764}, "Hızlı + tek hat": {"t": 8.0, "f": 4.4, "g": 3.4, "r": 214}, "Hızlı + tek hat + 2 katta bir": {"t": 7.3, "f": 2.4, "g": 3.3, "r": 213}, "Izgara + 2 katta bir": {"t": 7.3, "f": 2.9, "g": 3, "r": 596}}, "L braket (80×40×40)": {"Izgara": {"t": 27.5, "f": 10.5, "g": 16.4, "r": 1397}, "Gyroid": {"t": 38.9, "f": 25.3, "g": 16.5, "r": 7246}, "Doğrusal": {"t": 29.4, "f": 17.0, "g": 16.4, "r": 4903}, "Sarmal": {"t": 29.2, "f": 15.7, "g": 16.5, "r": 4477}, "Hızlı": {"t": 28.5, "f": 12.7, "g": 16.8, "r": 3221}, "Hızlı + tek hat": {"t": 27.8, "f": 10.2, "g": 17.6, "r": 1238}, "Hızlı + tek hat + 2 katta bir": {"t": 27.1, "f": 7.2, "g": 17.1, "r": 1120}, "Izgara + 2 katta bir": {"t": 27.0, "f": 7.0, "g": 16, "r": 1296}}, "Silindir (Ø60×50)": {"Izgara": {"t": 42.5, "f": 23.9, "g": 34.9, "r": 4164}, "Gyroid": {"t": 100.9, "f": 82.5, "g": 36, "r": 11889}, "Doğrusal": {"t": 43.5, "f": 25.1, "g": 34.9, "r": 5134}, "Sarmal": {"t": 43.5, "f": 25.0, "g": 35, "r": 5172}, "Hızlı": {"t": 43.2, "f": 24.6, "g": 34.9, "r": 5013}, "Hızlı + tek hat": {"t": 40.0, "f": 21.4, "g": 36.5, "r": 778}, "Hızlı + tek hat + 2 katta bir": {"t": 40.1, "f": 18.9, "g": 34.1, "r": 658}, "Izgara + 2 katta bir": {"t": 41.1, "f": 19.9, "g": 32.6, "r": 2379}}, "Telefon standı": {"Izgara": {"t": 90.5, "f": 20.5, "g": 46.5, "r": 6405}, "Gyroid": {"t": 129.8, "f": 59.7, "g": 47, "r": 14067}, "Doğrusal": {"t": 93.6, "f": 23.4, "g": 46.5, "r": 8366}, "Sarmal": {"t": 92.0, "f": 21.9, "g": 46.6, "r": 7633}, "Hızlı": {"t": 88.2, "f": 18.1, "g": 46.5, "r": 5609}, "Hızlı + tek hat": {"t": 85.2, "f": 15.1, "g": 48, "r": 1628}, "Hızlı + tek hat + 2 katta bir": {"t": 83.2, "f": 12.7, "g": 46.3, "r": 1506}, "Izgara + 2 katta bir": {"t": 85.7, "f": 15.3, "g": 45, "r": 4078}}, "Organik düğüm": {"Izgara": {"t": 76.8, "f": 12.1, "g": 27.9, "r": 8436}, "Gyroid": {"t": 95.0, "f": 30.3, "g": 28, "r": 13391}, "Doğrusal": {"t": 77.8, "f": 13.1, "g": 27.8, "r": 9397}, "Sarmal": {"t": 77.8, "f": 13.2, "g": 27.8, "r": 9454}, "Hızlı": {"t": 76.3, "f": 11.6, "g": 27.8, "r": 8563}, "Hızlı + tek hat": {"t": 74.6, "f": 9.9, "g": 28.7, "r": 6256}, "Hızlı + tek hat + 2 katta bir": {"t": 73.9, "f": 9.2, "g": 28, "r": 6549}, "Izgara + 2 katta bir": {"t": 75.7, "f": 11.0, "g": 27.2, "r": 8137}}};
+  var models = Object.keys(DATA), variants = Object.keys(DATA[models[0]]);
+  function avg(key) {
+    return variants.map(function (v) {
+      var sum = 0; models.forEach(function (m) { sum += DATA[m][v][key] / DATA[m]['Izgara'][key] - 1; });
+      return { v: v, p: sum / models.length * 100 };
+    });
+  }
+  function bars(el, list, scale) {
+    var best = list.reduce(function (a, b) { return b.p < a.p ? b : a; });
+    el.innerHTML = list.map(function (x) {
+      var w = Math.min(50, Math.abs(x.p) / scale * 50), left = x.p < 0 ? 50 - w : 50;
+      var txt = (x.p > 0 ? '+' : x.p < 0 ? '−' : '') + Math.abs(x.p).toFixed(Math.abs(x.p) < 10 ? 1 : 0) + '%';
+      var tpos = x.p < 0 ? 'right:' + (50 + w + 1) + '%' : 'left:' + (50 + w + 1) + '%';
+      if (w > 38) tpos = x.p < 0 ? 'left:2px' : 'right:2px';
+      return '<div class="bar"><div class="lbl' + (x === best ? ' best' : '') + '">' + x.v + '</div><div class="track"><i class="' + (x.p < 0 ? 'neg' : 'pos') + '" style="left:' + left + '%;width:' + w + '%"></i><span style="' + tpos + '">' + txt + '</span></div></div>';
+    }).join('');
+  }
+  bars(document.getElementById('barsInfill'), avg('f'), 60);
+  bars(document.getElementById('barsTotal'), avg('t'), 10);
+  var t = document.getElementById('benchTable');
+  var html = '<thead><tr><th>Toplam süre (dk)</th>' + models.map(function (m) { return '<th>' + m + '</th>'; }).join('') + '</tr></thead><tbody>';
+  variants.forEach(function (v) {
+    html += '<tr><td>' + v + '</td>' + models.map(function (m) {
+      var min = Math.min.apply(null, variants.map(function (x) { return DATA[m][x].t; }));
+      return '<td class="mono' + (DATA[m][v].t === min ? ' min' : '') + '">' + DATA[m][v].t.toFixed(1).replace('.', ',') + '</td>';
+    }).join('') + '</tr>';
+  });
+  t.innerHTML = html + '</tbody>';
+})();
+</script>

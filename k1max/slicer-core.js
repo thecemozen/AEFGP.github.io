@@ -536,7 +536,7 @@
     var extruder = -1;
     var retracted = false;
     var curF = 0, curAccel = 0, fanState = {};
-    var stats = { time: 0, e: [0, 0, 0, 0], toolChanges: 0 };
+    var stats = { time: 0, e: [0, 0, 0, 0], toolChanges: 0, byType: {} };
     var nL = layers.length;
     var bedCx = S.bedX / 2;
     var speedFactor = 1;
@@ -595,35 +595,66 @@
       setAccel(S.accelTravel);
       out.push('G0 X' + f3(x) + ' Y' + f3(y) + ' F' + Math.round(spd * 60));
       curF = spd;
-      stats.time += moveTime(d, spd, S.accelTravel);
+      stats.time += moveTime(d, spd, Math.min(S.accelTravel, S.machineMaxAccel)); // süre, sonraki yolun türüne yazılır
       if (S.previewTravel) preview.push(pos.x, pos.y, pos.z, x, y, pos.z, T.TRAVEL, extruder);
       pos.x = x; pos.y = y;
     }
     // pts: [[x,y]] ya da spiral için [[x,y,z]]
+    // Klipper köşe hızı (square corner velocity -> junction deviation)
+    function junctionV(ux, uy, wx, wy, a) {
+      var cosT = Math.max(-1, Math.min(1, -(ux * wx + uy * wy)));
+      if (cosT < -0.999999) return Infinity;           // düz devam
+      var sinH = Math.sqrt(0.5 * (1 - cosT));
+      if (sinH > 0.999999) return 0;                    // tam geri dönüş
+      var jd = S.squareCornerVelocity * S.squareCornerVelocity * (Math.SQRT2 - 1) / a;
+      return Math.sqrt(a * jd * sinH / (1 - sinH));
+    }
+    // Bir yolun süresi: köşelerde köşe hızına kadar yavaşlama, kısa parçalarda tepe hıza ulaşamama
+    function pathTime(seg, v, a) {
+      var n = seg.length, t = 0;
+      if (!n) return 0;
+      var vj = [0];
+      for (var i = 1; i < n; i++) vj.push(Math.min(v, junctionV(seg[i - 1].ux, seg[i - 1].uy, seg[i].ux, seg[i].uy, a)));
+      vj.push(0);
+      // ileri/geri geçiş: kavşak hızları ulaşılabilir olmalı
+      for (i = 1; i <= n; i++) vj[i] = Math.min(vj[i], Math.sqrt(vj[i - 1] * vj[i - 1] + 2 * a * seg[i - 1].d));
+      for (i = n - 1; i >= 0; i--) vj[i] = Math.min(vj[i], Math.sqrt(vj[i + 1] * vj[i + 1] + 2 * a * seg[i].d));
+      for (i = 0; i < n; i++) {
+        var d = seg[i].d, v0 = vj[i], v1 = vj[i + 1];
+        var vc = Math.min(v, Math.sqrt((2 * a * d + v0 * v0 + v1 * v1) / 2));
+        var da = (vc * vc - v0 * v0) / (2 * a), dd = (vc * vc - v1 * v1) / (2 * a);
+        t += (vc - v0) / a + (vc - v1) / a + Math.max(0, d - da - dd) / vc;
+      }
+      return t;
+    }
+    function addTime(type, t) { stats.time += t; stats.byType[type] = (stats.byType[type] || 0) + t; }
     function extrudePath(pts, speed, width, height, type, accel, flow, noTravel) {
       if (pts.length < 2) return;
+      var t0 = stats.time;
       if (!noTravel) travel(pts[0][0], pts[0][1]);
       unretract();
+      if (stats.time > t0) { stats.byType[type] = (stats.byType[type] || 0) + (stats.time - t0); }
       setAccel(accel);
       var F = fil();
       var vmax = num(F.maxVolumetric, 20) / (width * height);
       var sp = Math.max(Math.min(speed * speedFactor, vmax, S.machineMaxSpeed), Math.min(S.minSpeedFloor, speed));
       var eArea = (width - height * (1 - Math.PI / 4)) * height * (flow || 1) * num(F.flowRatio, 1) / fa();
-      var first = true;
+      var first = true, seg = [];
       for (var i = 1; i < pts.length; i++) {
         var x = pts[i][0], y = pts[i][1], z = pts[i].length > 2 ? pts[i][2] : pos.z;
         var dx = x - pos.x, dy = y - pos.y;
         var d = Math.sqrt(dx * dx + dy * dy);
         if (d < 0.005) continue;
+        seg.push({ d: d, ux: dx / d, uy: dy / d });
         var e = d * eArea;
         stats.e[Math.max(0, extruder)] += e;
         var line = 'G1 X' + f3(x) + ' Y' + f3(y) + (z !== pos.z ? ' Z' + f3(z) : '') + ' E' + f5(e);
         if (first || sp !== curF) { line += ' F' + Math.round(sp * 60); curF = sp; first = false; }
         out.push(line);
-        stats.time += moveTime(d, sp, accel);
         preview.push(pos.x, pos.y, pos.z, x, y, z, type, extruder);
         pos.x = x; pos.y = y; pos.z = z;
       }
+      addTime(type, pathTime(seg, sp, Math.min(accel || S.accelDefault, S.machineMaxAccel)));
     }
     function emitLinesJoined(lines, speed, width, height, type, accel, flow, monotonic) {
       if (!lines.length) return;
@@ -645,6 +676,29 @@
       }
       if (poly) polys.push(poly);
       polys.forEach(function (p) { extrudePath(p, speed, width, height, type, accel, flow); });
+    }
+    // Seyrek dolgu çizgilerini tek hatta bağla: komşu çizgilerin uçları arasındaki bağlantı bölge içinde kalıyorsa
+    function joinInRegion(lines, region, maxGap) {
+      var ordered = orderLines(lines, [pos.x, pos.y]);
+      var polys = [], poly = null;
+      for (var i = 0; i < ordered.length; i++) {
+        var s2 = ordered[i];
+        if (poly) {
+          var last = poly[poly.length - 1];
+          var gap = Math.hypot(s2[0][0] - last[0], s2[0][1] - last[1]);
+          if (gap <= maxGap && connectorInside(last, s2[0], region)) { poly.push(s2[0], s2[1]); continue; }
+          polys.push(poly);
+        }
+        poly = [s2[0], s2[1]];
+      }
+      if (poly) polys.push(poly);
+      return polys;
+    }
+    function connectorInside(a, b, region) {
+      var seg = [[{ X: Math.round(a[0] * SCALE), Y: Math.round(a[1] * SCALE) }, { X: Math.round(b[0] * SCALE), Y: Math.round(b[1] * SCALE) }]];
+      var c = clipOpen(seg, offset(region, 0.05, false));
+      var L = 0; c.forEach(function (p) { for (var k = 1; k < p.length; k++) L += Math.hypot(p[k][0] - p[k - 1][0], p[k][1] - p[k - 1][1]); });
+      return L >= Math.hypot(b[0] - a[0], b[1] - a[1]) * 0.98;
     }
     function emitLinesSeparate(lines, speed, width, height, type, accel) {
       orderLines(lines, [pos.x, pos.y]).forEach(function (s) { extrudePath(s, speed, width, height, type, accel, 1); });
@@ -841,6 +895,18 @@
 
       function emitPart(p) {
         var r = p.regions[li];
+        var N = Math.max(1, Math.min(4, S.infillEvery | 0));
+        var combo = null;
+        if (N > 1 && li > 0) {
+          var gs = 1 + Math.floor((li - 1) / N) * N, ge = Math.min(nL - 1, gs + N - 1);
+          p.combo = p.combo || {};
+          if (!p.combo[gs]) {
+            var c = p.regions[gs].sparse;
+            for (var k = gs + 1; k <= ge && c.length; k++) c = intersect(c, p.regions[k].sparse);
+            p.combo[gs] = { start: gs, end: ge, c: ge > gs ? opening(c, W.sparse * 2) : [] };
+          }
+          combo = p.combo[gs];
+        }
         if (S.labelObjects) out.push('EXCLUDE_OBJECT_START NAME=' + p.label);
         islandsOf(r.outline).forEach(function (isl) {
           var big = offset(isl, 0.01, false);
@@ -876,7 +942,16 @@
               }
             }
           }
-          if (sparse.length) { out.push(';TYPE:Sparse infill'); emitSparse(sparse); }
+          if (sparse.length || (N > 1 && combo && combo.c.length)) {
+            if (N > 1 && !first && combo) {
+              var own = difference(sparse, combo.c);
+              if (own.length) { out.push(';TYPE:Sparse infill'); emitSparse(own); }
+              if (li === combo.end) {
+                var cc = intersect(combo.c, big);
+                if (cc.length) { out.push(';TYPE:Sparse infill'); emitSparse(cc, combo.end - combo.start + 1); }
+              }
+            } else if (sparse.length) { out.push(';TYPE:Sparse infill'); emitSparse(sparse); }
+          }
         });
         if (S.labelObjects) out.push('EXCLUDE_OBJECT_END NAME=' + p.label);
       }
@@ -931,33 +1006,61 @@
         pos.z = z0;
         extrudePath(zpts, S.outerWallSpeed, w, h, T.OUTER, S.accelOuterWall, 1, true);
       }
-      function emitSparse(region) {
+      function emitSparse(region, hMul) {
+        var hh = h * (hMul || 1);
         var wsp = first ? W.first : W.sparse;
         var d = S.infillDensity / 100;
         var sp = spd(first ? S.firstLayerInfillSpeed : S.sparseInfillSpeed);
         var ac = first ? S.accelFirst : S.accelInfill;
         var A = S.infillAngle;
         var pat = S.infillPattern;
+        var gi = Math.floor(li / (hMul || 1)); // katman grubu (birleştirilmiş dolguda yön değişimi için)
+        var single = null; // tek yönlü desenler: açı
+        if (pat === 'helix') single = A + gi * S.helixStep;
+        else if (pat === 'golden') single = A + gi * 137.508;
+        else if (pat === 'speed') single = speedAngles(region, wsp / d)[gi % 2];
+        if (single !== null) {
+          var ls = lineFill(region, wsp / d, single % 180);
+          var polys = S.infillJoin ? joinInRegion(ls, region, (wsp / d) * 2.5) : orderLines(ls, [pos.x, pos.y]);
+          polys.forEach(function (p) { extrudePath(p, sp, wsp, hh, T.SPARSE, ac, 1); });
+          return;
+        }
         if (pat === 'gyroid') {
-          orderPolylines(gyroidFill(region, wsp / d, Ly.z), [pos.x, pos.y]).forEach(function (p) { extrudePath(p, sp, wsp, h, T.SPARSE, ac, 1); });
+          orderPolylines(gyroidFill(region, wsp / d, Ly.z), [pos.x, pos.y]).forEach(function (p) { extrudePath(p, sp, wsp, hh, T.SPARSE, ac, 1); });
         } else if (pat === 'concentric') {
-          emitLoops(concentricFill(region, wsp / d), sp, wsp, h, T.SPARSE, ac, 1);
+          emitLoops(concentricFill(region, wsp / d), sp, wsp, hh, T.SPARSE, ac, 1);
         } else if (pat === 'grid') {
           var s2 = 2 * wsp / d;
-          emitLinesSeparate(lineFill(region, s2, A).concat(lineFill(region, s2, A + 90)), sp, wsp, h, T.SPARSE, ac);
+          emitLinesSeparate(lineFill(region, s2, A).concat(lineFill(region, s2, A + 90)), sp, wsp, hh, T.SPARSE, ac);
         } else if (pat === 'triangles') {
           var s3 = 3 * wsp / d;
-          emitLinesSeparate(lineFill(region, s3, A).concat(lineFill(region, s3, A + 60), lineFill(region, s3, A - 60)), sp, wsp, h, T.SPARSE, ac);
+          emitLinesSeparate(lineFill(region, s3, A).concat(lineFill(region, s3, A + 60), lineFill(region, s3, A - 60)), sp, wsp, hh, T.SPARSE, ac);
         } else if (pat === 'cubic') {
           // 3 yönlü, z ile kayan çizgiler: kübik dolguya yakın bir yapı
           var s4 = 3 * wsp / d;
           var shift = (Ly.z % s4) / Math.SQRT2;
           var mk = function (a, sh) { return lineFill(region.map(function (pth) { return pth.map(function (q) { return { X: q.X + Math.round(sh * SCALE), Y: q.Y }; }); }), s4, a)
             .map(function (l) { return [l[0] - sh, l[1], l[2] - sh, l[3], l[4], l[5]]; }); };
-          emitLinesSeparate(mk(A, shift).concat(mk(A + 60, -shift), mk(A - 60, shift * 0.5)), sp, wsp, h, T.SPARSE, ac);
+          emitLinesSeparate(mk(A, shift).concat(mk(A + 60, -shift), mk(A - 60, shift * 0.5)), sp, wsp, hh, T.SPARSE, ac);
         } else { // rectilinear
-          emitLinesJoined(lineFill(region, wsp / d, li % 2 ? A : A + 90), sp, wsp, h, T.SPARSE, ac, 1);
+          var rl = lineFill(region, wsp / d, gi % 2 ? A : A + 90);
+          if (S.infillJoin) joinInRegion(rl, region, (wsp / d) * 2.5).forEach(function (p) { extrudePath(p, sp, wsp, hh, T.SPARSE, ac, 1); });
+          else emitLinesJoined(rl, sp, wsp, hh, T.SPARSE, ac, 1);
         }
+      }
+      // Hızlı desen: aralarında en az 40° olan ve toplamda en az (yani en uzun) çizgiyi veren iki yön.
+      // İnce duvarda iki yön de duvar boyunca uzanır; yuvarlak bölgede 90° farklı iki yön seçilir.
+      function speedAngles(region, spacing) {
+        var cnt = [];
+        for (var a = 0; a < 180; a += 15) cnt.push([a, lineFill(region, spacing, a).length]);
+        var best = [0, 90], bestC = Infinity, bestSep = 0;
+        for (var i = 0; i < cnt.length; i++) for (var j = i + 1; j < cnt.length; j++) {
+          var sep = Math.min(cnt[j][0] - cnt[i][0], 180 - (cnt[j][0] - cnt[i][0]));
+          if (sep < 40) continue;
+          var c = cnt[i][1] + cnt[j][1];
+          if (c < bestC - 0.5 || (Math.abs(c - bestC) <= 0.5 && sep > bestSep)) { bestC = c; best = [cnt[i][0], cnt[j][0]]; bestSep = sep; }
+        }
+        return best;
       }
       function emitSupport() {
         var ws = first ? W.first : W.support;
@@ -1025,7 +1128,8 @@
       preview: new Float32Array(preview),
       layerIndex: layerIndex,
       layerZ: layers.map(function (l) { return l.z; }),
-      stats: { time: timeS, filamentMm: totMm, grams: totG, cost: totCost, layers: nL, toolChanges: stats.toolChanges, perSlot: perSlot }
+      stats: { time: timeS, filamentMm: totMm, grams: totG, cost: totCost, layers: nL, toolChanges: stats.toolChanges, perSlot: perSlot,
+        timeByType: Object.keys(stats.byType).reduce(function (o, k) { o[k] = Math.round(stats.byType[k] * S.timeFactor * 10) / 10; return o; }, {}) }
     };
   }
 
