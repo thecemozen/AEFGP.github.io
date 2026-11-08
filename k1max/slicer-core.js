@@ -369,6 +369,9 @@
     return res;
   }
 
+  // Katı yüzeylerde çizgiler arası mesafe: yuvarlak kenarlı ekstrüzyon kesiti (Slic3r/Orca modeli)
+  function flowSpacing(w, h) { return w - h * (1 - Math.PI / 4); }
+
   function num(v, def) { return (v === null || v === undefined || v === '' || isNaN(v)) ? def : +v; }
 
   // ---------------------------------------------------------------- 1) katmanlar ve kesitler
@@ -423,10 +426,12 @@
       var first = li === 0;
       var wo = first ? W.first : W.outer, wi = first ? W.first : W.inner;
       var walls = [];
+      var hl = layers[li].h;
+      var so = flowSpacing(wo, hl), si = flowSpacing(wi, hl);
       var cur = offset(outline, -wo / 2, false);
       for (var k = 0; k < wallsN && cur.length; k++) {
         walls.push(cur);
-        if (k < wallsN - 1) cur = offset(cur, -(k === 0 ? (wo + wi) / 2 : wi), false);
+        if (k < wallsN - 1) cur = offset(cur, -(k === 0 ? (so + si) / 2 : si), false);
       }
       var lastW = walls.length > 1 ? wi : wo;
       var last = walls.length ? walls[walls.length - 1] : [];
@@ -680,6 +685,7 @@
     // Seyrek dolgu çizgilerini tek hatta bağla: komşu çizgilerin uçları arasındaki bağlantı bölge içinde kalıyorsa
     function joinInRegion(lines, region, maxGap) {
       var ordered = orderLines(lines, [pos.x, pos.y]);
+      region = offset(region, 0.05, false);
       var polys = [], poly = null;
       for (var i = 0; i < ordered.length; i++) {
         var s2 = ordered[i];
@@ -696,7 +702,7 @@
     }
     function connectorInside(a, b, region) {
       var seg = [[{ X: Math.round(a[0] * SCALE), Y: Math.round(a[1] * SCALE) }, { X: Math.round(b[0] * SCALE), Y: Math.round(b[1] * SCALE) }]];
-      var c = clipOpen(seg, offset(region, 0.05, false));
+      var c = clipOpen(seg, region);
       var L = 0; c.forEach(function (p) { for (var k = 1; k < p.length; k++) L += Math.hypot(p[k][0] - p[k - 1][0], p[k][1] - p[k - 1][1]); });
       return L >= Math.hypot(b[0] - a[0], b[1] - a[1]) * 0.98;
     }
@@ -719,8 +725,45 @@
     }
     function surfaceFill(region, pattern, width, angle, speed, height, type, accel, flow) {
       if (!region.length) return;
-      if (pattern === 'concentric') emitLoops(concentricFill(region, width), speed, width, height, type, accel, flow);
-      else emitLinesJoined(lineFill(region, width, angle), speed, width, height, type, accel, flow, pattern === 'monotonic');
+      var spc = flowSpacing(width, height);
+      if (pattern === 'concentric') emitLoops(concentricFill(region, spc), speed, width, height, type, accel, flow);
+      else if (pattern === 'monotonic') emitMonotonic(lineFill(region, spc, angle), region, spc, speed, width, height, type, accel, flow);
+      else emitLinesJoined(lineFill(region, spc, angle), speed, width, height, type, accel, flow);
+    }
+    // Monoton zikzak: satırlar sırayla (yüzey hep aynı yönde dolar), her satırda yön değişir,
+    // komşu satırlar bölge içinde kalan kısa bağlantıyla birleştirilir. Boşta geri dönüş yok.
+    function emitMonotonic(lines, region, spc, speed, width, height, type, accel, flow) {
+      if (!lines.length) return;
+      var reg = offset(region, 0.05, false);
+      var sorted = lines.slice().sort(function (a, b) { return a[4] - b[4] || a[5] - b[5]; });
+      var rows = [];
+      sorted.forEach(function (l) { var r = rows[rows.length - 1]; if (r && Math.abs(r.y - l[4]) < 2) r.items.push(l); else rows.push({ y: l[4], items: [l] }); });
+      // başlangıç: tarama yönünün en yakın ucundan
+      var first = rows[0].items[0], lastRow = rows[rows.length - 1].items[0];
+      if (Math.hypot(lastRow[0] - pos.x, lastRow[1] - pos.y) < Math.hypot(first[0] - pos.x, first[1] - pos.y)) rows.reverse();
+      var poly = null, dir = 1;
+      var flush = function () { if (poly) extrudePath(poly, speed, width, height, type, accel, flow); poly = null; };
+      rows.forEach(function (row) {
+        var items = dir > 0 ? row.items : row.items.slice().reverse();
+        items.forEach(function (l) {
+          var a = [l[0], l[1]], b = [l[2], l[3]];
+          if (dir < 0) { var t = a; a = b; b = t; }
+          if (poly) {
+            var last = poly[poly.length - 1];
+            if (Math.hypot(a[0] - last[0], a[1] - last[1]) <= spc * 2.5 && connectorInside(last, a, reg)) { poly.push(a, b); return; }
+            flush();
+          }
+          poly = [a, b];
+        });
+        dir = -dir;
+      });
+      flush();
+    }
+    // Üst yüzey yönü (otomatik): en az çizgi = en uzun çizgiler = en az çizgi ucu
+    function longestAngle(region) {
+      var best = 0, bestN = Infinity;
+      for (var a = 0; a < 180; a += 15) { var n = lineFill(region, 2, a).length; if (n < bestN) { bestN = n; best = a; } }
+      return best;
     }
     function fanPct(li) {
       var F = fil();
@@ -933,12 +976,13 @@
           }
           if (topOnly.length) {
             out.push(';TYPE:Top surface');
-            surfaceFill(topOnly, S.topPattern, W.top, ang, spd(S.topSurfaceSpeed), h, T.TOP, S.accelTop, S.topFlow);
+            var topAng = S.topAngleMode === 'auto' ? longestAngle(topOnly) : (S.topAngleMode === 'fixed' ? S.topAngle : ang);
+            surfaceFill(topOnly, S.topPattern, W.top, topAng, spd(S.topSurfaceSpeed), h, T.TOP, S.accelTop, S.topFlow);
             if (S.ironing !== 'none') {
               var ir = offset(S.ironing === 'all' || li === nL - 1 ? topOnly : difference(topOnly, job.U[li + 1]), -S.ironingInset, false);
               if (ir.length) {
                 out.push(';TYPE:Ironing');
-                emitLinesJoined(lineFill(ir, S.ironingSpacing, ang + 90), S.ironingSpeed, W.top, h, T.IRON, S.accelTop, S.ironingFlow / 100);
+                emitLinesJoined(lineFill(ir, S.ironingSpacing, topAng + 90), S.ironingSpeed, W.top, h, T.IRON, S.accelTop, S.ironingFlow / 100);
               }
             }
           }
