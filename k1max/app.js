@@ -427,6 +427,22 @@ function buildBed() {
     if (custom) { top.material.transparent = false; top.material.color.set(0xffffff); }
     top.material.needsUpdate = true;
   });
+  // ön tutma çıkıntısındaki logo yazısı (yalnızca K1 Max tablasında)
+  if (isK1) {
+    const cv = document.createElement('canvas'); cv.width = 1024; cv.height = 160;
+    const g = cv.getContext('2d');
+    g.fillStyle = 'rgba(255,255,255,0.55)';
+    g.font = '700 104px "Arial Black", "Helvetica Neue", Arial, sans-serif';
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    if ('letterSpacing' in g) g.letterSpacing = '14px';
+    g.fillText('CREALITY', 512, 84);
+    const lt = new THREE.CanvasTexture(cv); lt.colorSpace = THREE.SRGBColorSpace; lt.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    const logo = new THREE.Mesh(new THREE.PlaneGeometry(48, 7.5),
+      new THREE.MeshBasicMaterial({ map: lt, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
+    logo.position.set(B.x / 2, -14.5, 0.01);
+    logo.renderOrder = 1;
+    bedGroup.add(logo);
+  }
   // eksen göstergesi (0,0 noktası)
   const ax = (x, y, z, col) => {
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0.05, x, y, z + 0.05], 3));
