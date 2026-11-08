@@ -48,6 +48,11 @@ firmware'i yapar. Firmware sürümünüze göre farklı bir dizi gerekebilir: Cr
 - Bilgisayar sürümü (tek HTML) tarayıcı güvenliği nedeniyle yazıcı durumunu okuyamayabilir; Android uygulamasında bu kısıt yoktur.
 - Süre tahmini yaklaşıktır.
 
+## Üçüncü taraf dosyalar
+- `assets/creality_k1max_buildplate_texture.svg`: K1 Max tabla dokusu, [OrcaSlicer](https://github.com/SoftFever/OrcaSlicer)
+  deposundan (`resources/profiles/Creality/`), AGPL-3.0. Logo Creality'ye aittir.
+- `assets/K1_Max_Build_Plate.stl`: K1 Max tabla modeli.
+
 ## Dosyalar
 - `slicer-core.js` — dilimleme motoru (Web Worker ve Node'da çalışır)
 - `presets.js` — K1 Max ayarları

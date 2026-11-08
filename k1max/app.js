@@ -3,7 +3,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { CATEGORIES, SLOT_COLORS, SLOT_COUNT } from './presets.js';
 import { load3MF } from './threemf.js';
-import { K1MAX_BED_STL_B64 } from './bed-model.js';
+import { K1MAX_BED_STL_B64, K1MAX_BED_TEXTURE_SVG } from './bed-model.js';
 
 const $ = (id) => document.getElementById(id);
 const STORE_KEY = 'k1max-slicer-v2';
@@ -388,6 +388,12 @@ function gridCanvasTexture(bx, by) {
   const t = new THREE.CanvasTexture(cv);
   t.colorSpace = THREE.SRGBColorSpace;
   t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  // K1 Max'in orijinal tabla dokusu (logo, kenar işaretleri): ızgaranın üstüne
+  if (bx === 300 && by === 300) {
+    const img = new Image();
+    img.onload = () => { g.drawImage(img, 0, 0, cv.width, cv.height); t.needsUpdate = true; };
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(K1MAX_BED_TEXTURE_SVG);
+  }
   return t;
 }
 function bedTexture(bx, by, cb) {
@@ -427,22 +433,6 @@ function buildBed() {
     if (custom) { top.material.transparent = false; top.material.color.set(0xffffff); }
     top.material.needsUpdate = true;
   });
-  // ön tutma çıkıntısındaki logo yazısı (yalnızca K1 Max tablasında)
-  if (isK1) {
-    const cv = document.createElement('canvas'); cv.width = 1024; cv.height = 160;
-    const g = cv.getContext('2d');
-    g.fillStyle = 'rgba(255,255,255,0.55)';
-    g.font = '700 104px "Arial Black", "Helvetica Neue", Arial, sans-serif';
-    g.textAlign = 'center'; g.textBaseline = 'middle';
-    if ('letterSpacing' in g) g.letterSpacing = '14px';
-    g.fillText('CREALITY', 512, 84);
-    const lt = new THREE.CanvasTexture(cv); lt.colorSpace = THREE.SRGBColorSpace; lt.anisotropy = renderer.capabilities.getMaxAnisotropy();
-    const logo = new THREE.Mesh(new THREE.PlaneGeometry(48, 7.5),
-      new THREE.MeshBasicMaterial({ map: lt, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
-    logo.position.set(B.x / 2, -14.5, 0.01);
-    logo.renderOrder = 1;
-    bedGroup.add(logo);
-  }
   // eksen göstergesi (0,0 noktası)
   const ax = (x, y, z, col) => {
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0.05, x, y, z + 0.05], 3));
