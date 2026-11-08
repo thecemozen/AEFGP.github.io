@@ -454,7 +454,11 @@ function resize() {
   camera.aspect = w / h; camera.updateProjectionMatrix();
 }
 new ResizeObserver(resize).observe(wrap);
-renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+renderer.setAnimationLoop((now) => {
+  stepPlayback(now);
+  if (head && head.visible) { const sc = Math.min(6, Math.max(1, camera.position.distanceTo(head.position) / 120)); head.scale.setScalar(sc); }
+  controls.update(); renderer.render(scene, camera);
+});
 
 function setView(v) {
   // dikey (telefon) ekranda yatay görüş daraldığı için uzaklaş
@@ -704,7 +708,7 @@ const TYPE_INFO = [
   ['Etek / kenarlık', 0x3fb8af], ['Boş hareket', 0x7aa7ff], ['Üst yüzey', 0xff4f8b], ['Destek', 0x46a35e],
   ['Destek arayüzü', 0x2e7d4a], ['Köprü', 0x4f8bd6], ['Ütüleme', 0xffb3c7], ['Temizleme kulesi', 0x9aa3ad],
 ];
-const PV = 10;
+const PV = 11;
 
 function buildJob() {
   const S = Object.assign({}, state.printer.values, state.process.values);
@@ -902,35 +906,114 @@ function buildLegend() {
   const hex = (n) => '#' + n.toString(16).padStart(6, '0');
   lg.innerHTML = state.colorBy === 'slot'
     ? [...slots].sort().map(s => `<div><i style="background:${state.slots[s].color}"></i>Yuva ${s + 1}: ${escapeHtml(state.slots[s].name)}</div>`).join('')
-    : TYPE_INFO.map((t, i) => present.has(i) ? `<div><i style="background:${hex(t[1])}"></i>${t[0]}</div>` : '').join('');
+    : TYPE_INFO.map((t, i) => present.has(i) && (i !== 5 || state.process.values.previewTravel) ? `<div><i style="background:${hex(t[1])}"></i>${t[0]}</div>` : '').join('');
   lg.hidden = false;
 }
 $('colorBy').addEventListener('change', () => { state.colorBy = $('colorBy').value; saveState(); refreshPreviewColors(); });
 
-function updateLayer() {
+// ---------------- kafa hareketi önizlemesi
+let head = null;
+function makeHead() {
+  const g = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({ color: 0x2fbf6c, roughness: 0.35, metalness: 0.4 });
+  mat.depthTest = false; // nozul ucu basılan duvarların arasında kaybolmasın
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(2, 4, 28), mat);
+  tip.rotation.x = -Math.PI / 2; tip.position.z = 2;            // sivri uç aşağıda, z=0'da
+  tip.renderOrder = 10;
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(3.2, 3.2, 7, 28),
+    new THREE.MeshStandardMaterial({ color: 0xc9ced4, roughness: 0.3, metalness: 0.7, transparent: true, opacity: 0.55 }));
+  body.rotation.x = Math.PI / 2; body.position.z = 4 + 3.5;
+  g.add(tip, body);
+  g.visible = false;
+  scene.add(g);
+  return g;
+}
+const MOVE_NAMES = TYPE_INFO.map(t => t[0]);
+const playback = { on: false, acc: 0, last: 0 };
+function moveCount(li) { const idx = preview.userData.layerIndex; return idx[li + 1] - idx[li]; }
+function updateLayer(keepMove) {
   if (!preview) return;
   const li = parseInt($('layer').value, 10);
   const U = preview.userData, idx = U.layerIndex;
-  const s0 = $('onlyLayer').checked ? idx[li] : 0, s1 = idx[li + 1];
-  const e0 = U.exAt[s0], e1 = U.exAt[s1];
+  const n = moveCount(li);
+  $('move').max = n; $('moveMax').textContent = n;
+  if (keepMove !== true) $('move').value = n;
+  const m = Math.min(n, parseInt($('move').value, 10));
+  const s0 = $('onlyLayer').checked ? idx[li] : 0, cur = idx[li] + m;
+  const e0 = U.exAt[s0], e1 = U.exAt[cur];
   U.exMesh.geometry.setDrawRange(e0 * U.perEx, (e1 - e0) * U.perEx);
-  if (U.trMesh) { const t0 = U.trAt[s0], t1 = U.trAt[s1]; U.trMesh.geometry.setDrawRange(t0 * 2, (t1 - t0) * 2); }
+  const inMove = m < n || playback.on;
+  if (U.trMesh) {
+    const showAll = !!state.process.values.previewTravel;
+    const t0 = showAll ? U.trAt[s0] : U.trAt[idx[li]], t1 = (showAll || inMove) ? U.trAt[cur] : t0;
+    U.trMesh.geometry.setDrawRange(t0 * 2, (t1 - t0) * 2);
+  }
   $('layerNum').textContent = li + 1;
   $('layerZ').textContent = result.layerZ[li].toFixed(2);
+  $('moveNum').textContent = m;
+  // kafa konumu ve hareket bilgisi
+  if (!head) head = makeHead();
+  head.visible = inMove;
+  const pv = result.preview;
+  const si = m > 0 ? cur - 1 : idx[li];
+  if (si < pv.length / PV) {
+    const o = si * PV, end = m > 0;
+    head.position.set(pv[o + (end ? 3 : 0)], pv[o + (end ? 4 : 1)], pv[o + (end ? 5 : 2)]);
+    const t = pv[o + 6];
+    $('moveInfo').textContent = inMove
+      ? `${MOVE_NAMES[t] || ''} · ${Math.round(pv[o + 10])} mm/s · X${head.position.x.toFixed(1)} Y${head.position.y.toFixed(1)} Z${head.position.z.toFixed(2)}`
+      : '';
+  }
 }
-$('layer').addEventListener('input', updateLayer);
-$('onlyLayer').addEventListener('change', updateLayer);
-$('layerUp').addEventListener('click', () => { const r = $('layer'); r.value = Math.min(+r.max, +r.value + 1); updateLayer(); });
-$('layerDown').addEventListener('click', () => { const r = $('layer'); r.value = Math.max(0, +r.value - 1); updateLayer(); });
+function setMove(m) { $('move').value = Math.max(0, Math.min(+$('move').max, m)); updateLayer(true); }
+$('move').addEventListener('input', () => { stopPlayback(); updateLayer(true); });
+function stopPlayback() { playback.on = false; $('movePlay').classList.remove('on'); $('movePlay').textContent = '▶'; }
+$('movePlay').addEventListener('click', () => {
+  if (!preview) return;
+  if (playback.on) { stopPlayback(); updateLayer(true); return; }
+  // katmanın sonundaysak bu katmanın başından başla
+  if (+$('move').value >= +$('move').max) $('move').value = 0;
+  playback.on = true; playback.acc = 0; playback.last = performance.now();
+  $('movePlay').classList.add('on'); $('movePlay').textContent = '❚❚';
+  updateLayer(true);
+});
+// her karede: gerçek hareket sürelerine göre ilerle (uzunluk / hız × oynatma çarpanı)
+function stepPlayback(now) {
+  if (!playback.on || !preview) return;
+  const dt = Math.min(0.1, (now - playback.last) / 1000); playback.last = now;
+  playback.acc += dt * +$('moveSpeed').value;
+  const pv = result.preview, idx = preview.userData.layerIndex;
+  let li = +$('layer').value, m = +$('move').value, guard = 0;
+  while (guard++ < 5000) {
+    const n = moveCount(li);
+    if (m >= n) {
+      if (li >= +$('layer').max) { stopPlayback(); break; }
+      li++; m = 0; $('layer').value = li; continue;
+    }
+    const o = (idx[li] + m) * PV;
+    const d = Math.hypot(pv[o + 3] - pv[o], pv[o + 4] - pv[o + 1]);
+    const dur = d / Math.max(1, pv[o + 10]);
+    if (playback.acc < dur) break;
+    playback.acc -= dur; m++;
+  }
+  $('move').value = m;
+  updateLayer(true);
+}
+$('layer').addEventListener('input', () => { stopPlayback(); updateLayer(); });
+$('onlyLayer').addEventListener('change', () => updateLayer(true));
+$('layerUp').addEventListener('click', () => { stopPlayback(); const r = $('layer'); r.value = Math.min(+r.max, +r.value + 1); updateLayer(); });
+$('layerDown').addEventListener('click', () => { stopPlayback(); const r = $('layer'); r.value = Math.max(0, +r.value - 1); updateLayer(); });
 $('showModel').addEventListener('change', () => { partsGroup.visible = $('showModel').checked; });
 window.addEventListener('keydown', e => {
   if (!preview || (e.target.tagName === 'INPUT' && e.target.type !== 'range') || e.target.tagName === 'TEXTAREA') return;
   const r = $('layer');
   if (e.key === 'ArrowUp') { r.value = Math.min(+r.max, +r.value + 1); updateLayer(); e.preventDefault(); }
   if (e.key === 'ArrowDown') { r.value = Math.max(0, +r.value - 1); updateLayer(); e.preventDefault(); }
+  if (e.key === 'ArrowRight') { stopPlayback(); setMove(+$('move').value + 1); e.preventDefault(); }
+  if (e.key === 'ArrowLeft') { stopPlayback(); setMove(+$('move').value - 1); e.preventDefault(); }
 });
 
-function clearPreviewObj() { if (preview) { scene.remove(preview); preview.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); }); preview = null; } }
+function clearPreviewObj() { stopPlayback(); if (head) head.visible = false; if (preview) { scene.remove(preview); preview.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); }); preview = null; } }
 function clearPreview() {
   clearPreviewObj();
   result = null;

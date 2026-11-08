@@ -188,6 +188,13 @@
       <input type="range" id="layer" min="0" max="0" value="0">
       <button class="btn small step" id="layerUp" aria-label="Bir katman yukarı">+</button>
       <label class="chk"><input type="checkbox" id="onlyLayer"> Sadece bu katman</label>
+      <div class="moverow">
+        <button class="btn small step" id="movePlay" aria-label="Kafa hareketini oynat">▶</button>
+        <label for="move" class="mlabel">Hareket <b id="moveNum">0</b> / <span id="moveMax">0</span></label>
+        <input type="range" id="move" min="0" max="0" value="0" aria-label="Katman içindeki hareket">
+        <select id="moveSpeed" class="mini" aria-label="Oynatma hızı"><option value="1">1×</option><option value="5">5×</option><option value="20" selected>20×</option><option value="100">100×</option></select>
+        <span id="moveInfo" class="moveinfo"></span>
+      </div>
     </footer>
     <div class="stats" id="stats"></div>
   </section>
