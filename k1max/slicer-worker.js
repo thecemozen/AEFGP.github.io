@@ -6,7 +6,7 @@ self.onmessage = function (ev) {
   if (msg.type !== 'slice') return;
   try {
     var t0 = Date.now();
-    var res = self.K1Slicer.slice(msg.positions, msg.settings, function (p, text) {
+    var res = self.K1Slicer.slice(msg.job, function (p, text) {
       self.postMessage({ type: 'progress', p: p, text: text });
     });
     res.stats.ms = Date.now() - t0;

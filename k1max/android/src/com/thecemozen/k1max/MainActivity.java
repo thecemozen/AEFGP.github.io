@@ -27,7 +27,25 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.Inet4Address;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.NetworkInterface;
+import java.net.Socket;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 /**
  * K1 Max Dilimleyici - Android kabuğu.
@@ -185,6 +203,135 @@ public class MainActivity extends Activity {
                 toastJs("Paylaşılamadı: " + e.getMessage());
             }
         }
+
+        /**
+         * Yazıcıya (Moonraker) HTTP isteği. Tarayıcının CORS kısıtı olmadan, arka planda çalışır.
+         * meta: { method, url, headers:{}, timeout, upload: { field, filename, fields:{} } | null }
+         * Sonuç: window.k1HttpCb(id, status, text)   (status = -1: bağlantı hatası)
+         */
+        @JavascriptInterface
+        public void http(final String id, final String metaJson, final String body) {
+            net.execute(new Runnable() { @Override public void run() { doHttp(id, metaJson, body); } });
+        }
+
+        /** Aynı Wi-Fi ağında verilen portu açık olan cihazları bulur. Sonuç: window.k1ScanCb(id, '["ip", ...]') */
+        @JavascriptInterface
+        public void scan(final String id, final int port) {
+            net.execute(new Runnable() { @Override public void run() { doScan(id, port); } });
+        }
+    }
+
+    // ------------------------------------------------------------------ ağ
+    private final ExecutorService net = Executors.newFixedThreadPool(3);
+
+    private void jsCall(final String js) {
+        runOnUiThread(new Runnable() { @Override public void run() { web.evaluateJavascript(js, null); } });
+    }
+
+    private void doHttp(String id, String metaJson, String body) {
+        HttpURLConnection c = null;
+        try {
+            JSONObject meta = new JSONObject(metaJson);
+            String method = meta.optString("method", "GET");
+            int timeout = meta.optInt("timeout", 8000);
+            c = (HttpURLConnection) new URL(meta.getString("url")).openConnection();
+            c.setRequestMethod(method);
+            c.setConnectTimeout(Math.min(timeout, 8000));
+            c.setReadTimeout(timeout);
+            JSONObject h = meta.optJSONObject("headers");
+            if (h != null) {
+                Iterator<String> it = h.keys();
+                while (it.hasNext()) { String k = it.next(); c.setRequestProperty(k, h.getString(k)); }
+            }
+            JSONObject up = meta.optJSONObject("upload");
+            if (up != null) {
+                String boundary = "----k1max" + System.currentTimeMillis();
+                c.setDoOutput(true);
+                c.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
+                StringBuilder pre = new StringBuilder();
+                JSONObject fields = up.optJSONObject("fields");
+                if (fields != null) {
+                    Iterator<String> it = fields.keys();
+                    while (it.hasNext()) {
+                        String k = it.next();
+                        pre.append("--").append(boundary).append("\r\nContent-Disposition: form-data; name=\"").append(k)
+                           .append("\"\r\n\r\n").append(fields.getString(k)).append("\r\n");
+                    }
+                }
+                pre.append("--").append(boundary).append("\r\nContent-Disposition: form-data; name=\"")
+                   .append(up.optString("field", "file")).append("\"; filename=\"").append(up.getString("filename").replace("\"", "_"))
+                   .append("\"\r\nContent-Type: application/octet-stream\r\n\r\n");
+                byte[] head = pre.toString().getBytes(StandardCharsets.UTF_8);
+                byte[] data = body.getBytes(StandardCharsets.UTF_8);
+                byte[] tail = ("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8);
+                c.setFixedLengthStreamingMode((long) head.length + data.length + tail.length);
+                try (OutputStream os = c.getOutputStream()) {
+                    os.write(head);
+                    int chunk = 256 * 1024, lastPct = -1;
+                    for (int off = 0; off < data.length; off += chunk) {
+                        os.write(data, off, Math.min(chunk, data.length - off));
+                        int pct = (int) (100L * (off + chunk) / Math.max(1, data.length));
+                        if (pct / 5 != lastPct / 5) { lastPct = pct; jsCall("window.k1HttpProgress&&k1HttpProgress('" + id + "'," + Math.min(1.0, pct / 100.0) + ")"); }
+                    }
+                    os.write(tail);
+                }
+            } else if (body != null && body.length() > 0 && !"GET".equals(method)) {
+                c.setDoOutput(true);
+                c.setRequestProperty("Content-Type", "application/json");
+                try (OutputStream os = c.getOutputStream()) { os.write(body.getBytes(StandardCharsets.UTF_8)); }
+            }
+            int status = c.getResponseCode();
+            InputStream in = status >= 400 ? c.getErrorStream() : c.getInputStream();
+            String text = in == null ? "" : new String(readAll(in), StandardCharsets.UTF_8);
+            jsCall("window.k1HttpCb('" + id + "'," + status + "," + jsString(text) + ")");
+        } catch (Exception e) {
+            jsCall("window.k1HttpCb('" + id + "',-1," + jsString(e.getClass().getSimpleName() + ": " + e.getMessage()) + ")");
+        } finally {
+            if (c != null) c.disconnect();
+        }
+    }
+
+    private void doScan(final String id, final int port) {
+        final List<String> found = Collections.synchronizedList(new ArrayList<String>());
+        List<String> prefixes = new ArrayList<>();
+        String self = null;
+        try {
+            for (NetworkInterface ni : Collections.list(NetworkInterface.getNetworkInterfaces())) {
+                if (!ni.isUp() || ni.isLoopback()) continue;
+                for (InetAddress a : Collections.list(ni.getInetAddresses())) {
+                    if (a instanceof Inet4Address && a.isSiteLocalAddress()) {
+                        String ip = a.getHostAddress();
+                        String p = ip.substring(0, ip.lastIndexOf('.') + 1);
+                        if (!prefixes.contains(p)) prefixes.add(p);
+                        self = ip;
+                    }
+                }
+            }
+        } catch (Exception ignored) { }
+        ExecutorService pool = Executors.newFixedThreadPool(48);
+        final int total = prefixes.size() * 254;
+        final AtomicInteger done = new AtomicInteger();
+        for (final String p : prefixes) {
+            for (int i = 1; i <= 254; i++) {
+                final String ip = p + i;
+                if (ip.equals(self)) { done.incrementAndGet(); continue; }
+                pool.execute(new Runnable() {
+                    @Override public void run() {
+                        try (Socket s = new Socket()) {
+                            s.connect(new InetSocketAddress(ip, port), 400);
+                            found.add(ip);
+                        } catch (Exception ignored) { }
+                        int d = done.incrementAndGet();
+                        if (d % 25 == 0) jsCall("window.k1ScanProgress&&k1ScanProgress('" + id + "'," + (d / (double) Math.max(1, total)) + ")");
+                    }
+                });
+            }
+        }
+        pool.shutdown();
+        try { pool.awaitTermination(60, TimeUnit.SECONDS); } catch (InterruptedException ignored) { }
+        JSONArray arr = new JSONArray();
+        synchronized (found) { for (String ip : found) arr.put(ip); }
+        jsCall("window.k1ScanCb('" + id + "'," + jsString(arr.toString()) + ")");
     }
 
     private Uri writeToDownloads(String name, String content) throws Exception {

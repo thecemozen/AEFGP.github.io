@@ -9,7 +9,7 @@
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <title>K1 Max Dilimleyici</title>
-<meta name="description" content="Creality K1 Max için hazır ayarlı, tarayıcıda çalışan STL dilimleyici.">
+<meta name="description" content="Creality K1 Max (CFS) için hazır ayarlı, tarayıcıda çalışan STL/3MF dilimleyici.">
 <link rel="stylesheet" href="style.css">
 <script type="importmap">
 { "imports": {
@@ -18,66 +18,158 @@
 } }
 </script>
 </head>
-<body>
+<body data-tab="model">
+<input id="file" type="file" accept=".stl,.3mf,model/stl,model/3mf,application/sla,application/vnd.ms-pki.stl,application/octet-stream,application/zip" hidden>
+<input id="fileAdd" type="file" accept=".stl,.3mf,model/stl,model/3mf,application/sla,application/vnd.ms-pki.stl,application/octet-stream,application/zip" multiple hidden>
+<input id="importProfile" type="file" accept=".json,application/json" hidden>
+
 <header class="top">
-  <div class="brand"><span class="logo">K1</span><div><strong>K1 Max Dilimleyici</strong><small>Creality K1 Max · 300×300×300 · 0.4 nozul</small></div></div>
+  <div class="brand"><span class="logo">K1</span><div><strong>K1 Max Dilimleyici</strong><small>Creality K1 Max · CFS · 300×300×300</small></div></div>
   <button class="btn small" id="install" hidden>Uygulamayı yükle</button>
   <div class="top-actions">
-    <label class="btn" for="file">STL Aç<input id="file" type="file" accept=".stl,model/stl,model/x.stl-binary,application/sla,application/vnd.ms-pki.stl,application/octet-stream" hidden></label>
-    <button class="btn" id="demo">Örnek model</button>
+    <label class="btn" for="file">Aç</label>
+    <button class="btn" id="demo">Örnek</button>
     <button class="btn primary" id="slice" disabled>Dilimle</button>
     <button class="btn accent" id="download" disabled>G-code indir</button>
+    <button class="btn" id="send" disabled>Yazıcıya gönder</button>
   </div>
 </header>
 
 <main>
   <aside class="panel" id="panel">
-    <section class="card" data-sec="model">
-      <h2>Hazır ayar</h2>
-      <label class="row"><span>Filament</span><select id="filament"></select></label>
-      <label class="row"><span>Kalite</span><select id="quality"></select></label>
-      <button class="btn small" id="applyPreset">Hazır ayarı uygula</button>
-      <p class="hint" id="presetHint"></p>
-    </section>
+    <nav class="ptabs">
+      <button data-tab="model">Model</button>
+      <button data-tab="settings">Ayarlar</button>
+      <button data-tab="device">Cihaz</button>
+    </nav>
 
-    <section class="card" data-sec="model">
-      <h2>Model</h2>
-      <div id="modelInfo" class="hint">Model yüklenmedi. STL dosyasını açın ya da buraya sürükleyin.</div>
-      <div class="btn-row mobile-only">
-        <label class="btn small" for="file">STL Aç</label>
-        <button class="btn small" id="demo2">Örnek model</button>
-      </div>
-      <label class="row"><span>Ölçek</span><span class="inp"><input id="scale" type="number" value="100" min="1" max="2000" step="1"><em>%</em></span></label>
-      <div class="btn-row">
-        <button class="btn small" data-rot="x">X 90°</button>
-        <button class="btn small" data-rot="y">Y 90°</button>
-        <button class="btn small" data-rot="z">Z 90°</button>
-        <button class="btn small" id="layflat" title="En geniş düz yüzeyi tablaya yatırır">Yüzeye yatır</button>
-      </div>
-    </section>
+    <!-- ===================== MODEL ===================== -->
+    <div data-sec="model">
+      <section class="card">
+        <h2>Profiller</h2>
+        <label class="row"><span>Yazıcı</span><select id="qPrinter"></select></label>
+        <label class="row"><span>İşlem</span><select id="qProcess"></select></label>
+        <p class="hint" id="qHint"></p>
+      </section>
 
-    <div id="settings" data-sec="settings"></div>
+      <section class="card">
+        <h2>CFS yuvaları</h2>
+        <div id="slotList" class="slots"></div>
+        <p class="hint">Her yuvaya o yuvada takılı filamenti ve rengini seçin. Parçalara yuva atamayı aşağıdan yapın.</p>
+      </section>
 
-    <section class="card" data-sec="settings">
-      <h2>Profil</h2>
-      <div class="btn-row">
-        <button class="btn small" id="exportProfile">Dışa aktar</button>
-        <label class="btn small" for="importProfile">İçe aktar<input id="importProfile" type="file" accept=".json" hidden></label>
-        <button class="btn small" id="resetProfile">Sıfırla</button>
+      <section class="card">
+        <h2>Parçalar</h2>
+        <div id="modelInfo" class="hint">Model yüklenmedi. STL ya da 3MF açın veya buraya sürükleyin.</div>
+        <div id="partList" class="parts"></div>
+        <div class="btn-row">
+          <label class="btn small" for="file">Aç</label>
+          <label class="btn small" for="fileAdd">Parça ekle</label>
+          <button class="btn small" id="split" title="Birbirine değmeyen gövdeleri ayrı parçalara böler">Parçalara ayır</button>
+          <button class="btn small" id="arrange" title="Parçaları tablaya yan yana dizer">Yan yana diz</button>
+          <button class="btn small" id="demo2">Örnek</button>
+          <button class="btn small" id="demoMulti">Örnek (2 renk)</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Dönüştür</h2>
+        <label class="row"><span>Ölçek</span><span class="inp"><input id="scale" type="number" value="100" min="1" max="2000" step="1"><em>%</em></span></label>
+        <div class="btn-row">
+          <button class="btn small" data-rot="x">X 90°</button>
+          <button class="btn small" data-rot="y">Y 90°</button>
+          <button class="btn small" data-rot="z">Z 90°</button>
+          <button class="btn small" id="layflat" title="En geniş düz yüzeyi tablaya yatırır">Yüzeye yatır</button>
+        </div>
+      </section>
+    </div>
+
+    <!-- ===================== AYARLAR ===================== -->
+    <div data-sec="settings">
+      <nav class="cats" id="cats">
+        <button data-cat="printer">Yazıcı</button>
+        <button data-cat="filament">Filament</button>
+        <button data-cat="process">İşlem</button>
+      </nav>
+      <div class="card presetbar">
+        <div id="filSlots" class="chips"></div>
+        <div class="row"><select id="presetSel"></select><span id="modBadge" class="badge" hidden>değiştirildi</span></div>
+        <div class="btn-row">
+          <button class="btn small" id="pSave">Kaydet</button>
+          <button class="btn small" id="pSaveAs">Farklı kaydet</button>
+          <button class="btn small" id="pDelete">Sil</button>
+          <button class="btn small" id="pReset">Geri al</button>
+        </div>
       </div>
-      <p class="hint">Ayarlarınız bu tarayıcıda otomatik saklanır.</p>
-    </section>
+      <div class="searchrow">
+        <input id="search" type="search" placeholder="Ayar ara…">
+        <label class="chk"><input type="checkbox" id="advanced"> Gelişmiş</label>
+      </div>
+      <div id="secChips" class="chips"></div>
+      <div id="settingsBody"></div>
+      <section class="card">
+        <h2>Yedek</h2>
+        <div class="btn-row">
+          <button class="btn small" id="exportProfile">Tüm profilleri dışa aktar</button>
+          <label class="btn small" for="importProfile">İçe aktar</label>
+          <button class="btn small" id="resetAll">Fabrika ayarları</button>
+        </div>
+        <p class="hint">Ayarlarınız ve profilleriniz bu cihazda otomatik saklanır.</p>
+      </section>
+    </div>
+
+    <!-- ===================== CİHAZ ===================== -->
+    <div data-sec="device">
+      <section class="card">
+        <h2>Bağlantı (Moonraker)</h2>
+        <label class="row"><span>IP adresi</span><input id="devIp" type="text" inputmode="decimal" placeholder="192.168.1.50" class="txt"></label>
+        <label class="row"><span>Port</span><input id="devPort" type="number" min="1" max="65535" step="1"></label>
+        <div class="btn-row">
+          <button class="btn small primary" id="devConnect">Bağlan</button>
+          <button class="btn small" id="devScan">Ağda ara</button>
+          <button class="btn small" id="devWeb">Fluidd'i aç</button>
+        </div>
+        <div id="scanList" class="parts"></div>
+        <p class="hint" id="devHint"></p>
+      </section>
+      <section class="card" id="devStatusCard" hidden>
+        <h2>Durum</h2>
+        <div class="status">
+          <div><small>Durum</small><b id="stState">–</b></div>
+          <div><small>Nozul</small><b id="stNozzle">–</b></div>
+          <div><small>Tabla</small><b id="stBed">–</b></div>
+          <div><small>İlerleme</small><b id="stProg">–</b></div>
+        </div>
+        <div class="hint" id="stFile"></div>
+        <div class="bar small"><i id="stBar"></i></div>
+        <div class="btn-row">
+          <button class="btn small" id="devPause">Duraklat</button>
+          <button class="btn small" id="devResume">Devam</button>
+          <button class="btn small danger" id="devCancel">İptal</button>
+        </div>
+      </section>
+      <section class="card">
+        <h2>Gönder</h2>
+        <p class="hint" id="sendHint">Önce modeli dilimleyin.</p>
+        <div class="btn-row">
+          <button class="btn small" id="devUpload" disabled>Yükle</button>
+          <button class="btn small accent" id="devUploadStart" disabled>Yükle ve başlat</button>
+        </div>
+        <div class="bar small" id="upBarWrap" hidden><i id="upBar"></i></div>
+      </section>
+    </div>
   </aside>
 
   <section class="view">
     <div id="canvasWrap">
-      <div id="drop" class="drop">STL dosyasını bırakın</div>
+      <div id="drop" class="drop">STL / 3MF dosyasını bırakın</div>
       <div id="busy" class="busy" hidden><div class="bar"><i id="busyBar"></i></div><span id="busyText">Dilimleniyor…</span></div>
       <div class="legend" id="legend" hidden></div>
       <div class="viewbtns">
         <button class="btn small" data-view="iso">3B</button>
         <button class="btn small" data-view="top">Üst</button>
         <button class="btn small" data-view="front">Ön</button>
+        <select id="colorBy" class="mini" hidden><option value="type">Özellik</option><option value="slot">Filament</option></select>
         <label class="chk"><input type="checkbox" id="showModel" checked> Model</label>
       </div>
     </div>
@@ -95,14 +187,24 @@
 <div class="mobilebar">
   <div class="actions">
     <button class="btn primary" id="mSlice" disabled>Dilimle</button>
+    <button class="btn" id="mSend" disabled>Gönder</button>
     <button class="btn accent" id="mDownload" disabled>İndir</button>
-    <button class="btn" id="mShare" disabled hidden>Paylaş</button>
+    <button class="btn icon" id="mShare" disabled hidden aria-label="Paylaş">⤴</button>
   </div>
   <nav class="tabs">
-    <button data-tab="model" class="on">Model</button>
+    <button data-tab="model">Model</button>
     <button data-tab="settings">Ayarlar</button>
     <button data-tab="view">Önizleme</button>
+    <button data-tab="device">Cihaz</button>
   </nav>
+</div>
+
+<div class="modal" id="modal" hidden>
+  <div class="sheet">
+    <h3 id="mTitle"></h3>
+    <div id="mBody"></div>
+    <div class="btn-row right" id="mBtns"></div>
+  </div>
 </div>
 
 <script type="module" src="app.js"></script>
