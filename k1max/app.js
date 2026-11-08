@@ -420,19 +420,56 @@ const TYPE_INFO = [
 $('slice').addEventListener('click', () => {
   if (!mesh) return;
   if (worker) worker.terminate();
-  worker = new Worker('slicer-worker.js');
   const positions = new Float32Array(mesh.geometry.attributes.position.array);
+  const job = { type: 'slice', positions, settings: Object.assign({}, settings) };
   $('busy').hidden = false; $('busyBar').style.width = '0%'; $('busyText').textContent = 'Hazırlanıyor…';
   $('slice').disabled = true;
+  startWorker(makeWorker(), job, positions);
+});
+
+// Web sürümünde ayrı dosya, tek dosyalık (bilgisayar / APK) sürümde gömülü kaynaktan worker;
+// worker açılamazsa dilimleme ana iş parçacığında yapılır.
+function makeWorker() {
+  if (window.K1_WORKER_SRC) {
+    try { return new Worker(URL.createObjectURL(new Blob([window.K1_WORKER_SRC], { type: 'text/javascript' }))); }
+    catch (e) { return mainThreadWorker(); }
+  }
+  return new Worker('slicer-worker.js');
+}
+function mainThreadWorker() {
+  const w = { onmessage: null, onerror: null, terminate() { w.dead = true; } };
+  w.postMessage = (msg) => setTimeout(() => {
+    const send = (data) => { if (!w.dead && w.onmessage) w.onmessage({ data }); };
+    try {
+      const res = window.K1Slicer.slice(msg.positions, msg.settings, (p, text) => send({ type: 'progress', p, text }));
+      res.stats.ms = 0;
+      send({ type: 'done', result: res });
+    } catch (e) { send({ type: 'error', message: e && e.message ? e.message : String(e) }); }
+  }, 50);
+  return w;
+}
+function startWorker(w, job, positions) {
+  worker = w;
+  let heard = false;
+  const backup = window.K1Slicer ? positions.slice() : null;
   worker.onmessage = (ev) => {
+    heard = true;
     const m = ev.data;
     if (m.type === 'progress') { $('busyBar').style.width = (m.p * 100).toFixed(0) + '%'; $('busyText').textContent = m.text; }
     else if (m.type === 'done') { $('busy').hidden = true; $('slice').disabled = false; onResult(m.result); worker.terminate(); worker = null; }
     else if (m.type === 'error') { $('busy').hidden = true; $('slice').disabled = false; toast('Dilimleme hatası: ' + m.message, true); worker.terminate(); worker = null; }
   };
-  worker.onerror = (e) => { $('busy').hidden = true; $('slice').disabled = false; toast('Dilimleme hatası: ' + e.message, true); };
-  worker.postMessage({ type: 'slice', positions, settings: Object.assign({}, settings) }, [positions.buffer]);
-});
+  worker.onerror = (e) => {
+    if (!heard && backup) { // gömülü worker çalışmadı: ana iş parçacığında dene
+      worker.terminate();
+      $('busyText').textContent = 'Dilimleniyor… (bu biraz sürebilir)';
+      startWorker(mainThreadWorker(), Object.assign({}, job, { positions: backup }), backup);
+      return;
+    }
+    $('busy').hidden = true; $('slice').disabled = false; toast('Dilimleme hatası: ' + (e.message || 'bilinmeyen'), true);
+  };
+  worker.postMessage(job, worker instanceof Worker ? [positions.buffer] : []);
+}
 
 function onResult(res) {
   result = res;
@@ -538,9 +575,11 @@ const canShareFiles = (() => {
   try { return !!(navigator.canShare && navigator.canShare({ files: [new File(['x'], 'a.gcode', { type: 'text/plain' })] })); }
   catch (e) { return false; }
 })();
-if (canShareFiles) $('mShare').hidden = false;
+const bridge = window.AndroidBridge || null;
+if (canShareFiles || bridge) $('mShare').hidden = false;
 $('mShare').addEventListener('click', async () => {
   if (!result) return;
+  if (bridge) { bridge.shareFile(gcodeName(), result.gcode); return; }
   const file = new File([result.gcode], gcodeName(), { type: 'text/plain' });
   try { await navigator.share({ files: [file], title: gcodeName() }); }
   catch (e) { if (e.name !== 'AbortError') toast('Paylaşılamadı, İndir düğmesini kullanın.', true); }
@@ -561,7 +600,7 @@ $('install').addEventListener('click', async () => {
 window.addEventListener('appinstalled', () => { $('install').hidden = true; toast('Uygulama yüklendi.'); });
 
 // Çevrimdışı çalışma
-if ('serviceWorker' in navigator) {
+if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol) && !window.K1_STANDALONE) {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
 }
 
@@ -573,7 +612,17 @@ if ('launchQueue' in window) {
 }
 
 // ------------------------------------------------------------ yardımcılar
+// Android uygulaması: dosyayı doğrudan İndirilenler klasörüne yazar
+window.k1LoadBase64 = (name, b64) => {
+  const bin = atob(b64); const u8 = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  loadFile(new File([u8], name || 'model.stl'));
+};
 function download(blob, name) {
+  if (window.AndroidBridge) {
+    blob.text().then(t => toast(window.AndroidBridge.saveFile(name, t)));
+    return;
+  }
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = name;
   document.body.appendChild(a); a.click(); a.remove();
@@ -585,6 +634,7 @@ function fmtTime(s) {
 }
 function escapeHtml(s) { return s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 let toastTimer;
+window.k1Toast = (m) => toast(m);
 function toast(msg, err) {
   let t = document.querySelector('.toast');
   if (!t) {

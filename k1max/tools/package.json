@@ -1,0 +1,14 @@
+{
+  "name": "k1max-build",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "standalone": "node build-standalone.mjs",
+    "apk": "node build-standalone.mjs && bash ../android/build-apk.sh"
+  },
+  "devDependencies": {
+    "esbuild": "0.20.2",
+    "three": "0.160.0",
+    "clipper-lib": "6.4.2"
+  }
+}

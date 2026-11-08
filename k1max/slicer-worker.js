@@ -1,5 +1,5 @@
 /* Dilimlemeyi arayüzü dondurmadan arka planda çalıştırır. */
-importScripts('https://cdn.jsdelivr.net/npm/clipper-lib@6.4.2/clipper.js', 'slicer-core.js');
+if (!self.K1Slicer) importScripts('https://cdn.jsdelivr.net/npm/clipper-lib@6.4.2/clipper.js', 'slicer-core.js');
 
 self.onmessage = function (ev) {
   var msg = ev.data;

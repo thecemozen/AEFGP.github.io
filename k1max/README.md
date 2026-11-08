@@ -11,7 +11,22 @@ Creality K1 Max için tarayıcıda çalışan basit bir STL → G-code dilimleyi
 - Katman katman 3B önizleme, süre ve filament tahmini
 - Model döndürme, ölçekleme, "yüzeye yatır"
 
-## Android'de kullanım
+## İndir ve kur (internet gerekmez)
+- **Bilgisayar:** [`dist/K1MaxDilimleyici.html`](dist/K1MaxDilimleyici.html) dosyasını indirin, çift tıklayın. Chrome / Edge / Firefox'ta açılır, tamamen çevrimdışı çalışır.
+- **Android (APK):** [`dist/K1MaxDilimleyici.apk`](dist/K1MaxDilimleyici.apk) dosyasını telefona indirin, açın ve
+  *Bilinmeyen kaynaklardan yüklemeye izin ver* deyin. Android 7.0 ve üstü.
+  - STL dosyasını uygulamadan **Model → STL Aç** ile seçin ya da dosya yöneticisinde *Birlikte aç → K1 Max Dilimleyici* deyin.
+  - **İndir** G-code'u `İndirilenler/K1Max` klasörüne kaydeder; **Paylaş** Creality Cloud, Drive, WhatsApp vb. ile gönderir.
+
+### Yeniden derleme
+```bash
+cd k1max/tools && npm install && node build-standalone.mjs   # tek dosyalık HTML
+bash ../android/build-apk.sh                                  # APK (aapt, dx, apksigner gerekir)
+```
+APK, ilk derlemede oluşturulan `android/k1max-release.jks` anahtarıyla imzalanır (depoya eklenmez).
+Farklı anahtarla derlenen yeni sürümü kurmadan önce eski uygulamayı kaldırmanız gerekir.
+
+## Android'de tarayıcıdan kullanım (PWA)
 1. Telefonda Chrome ile sayfayı açın.
 2. **Uygulamayı yükle** düğmesine (ya da Chrome menüsü → *Ana ekrana ekle*) dokunun. Uygulama ana ekrana kurulur ve tam ekran açılır.
 3. İlk açılıştan sonra internet olmadan da çalışır.
@@ -27,4 +42,6 @@ Creality K1 Max için tarayıcıda çalışan basit bir STL → G-code dilimleyi
 - `slicer-core.js` — dilimleme motoru (Web Worker ve Node'da çalışır)
 - `presets.js` — K1 Max ayarları
 - `app.js` — arayüz ve 3B önizleme
+- `tools/build-standalone.mjs` — tek dosyalık HTML üretir
+- `android/` — APK kaynakları (WebView kabuğu, `build-apk.sh`)
 - Kütüphaneler jsDelivr CDN'den sabit sürümle yüklenir: three.js 0.160.0 (MIT), clipper-lib 6.4.2 (Boost lisansı)

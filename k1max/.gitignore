@@ -1,0 +1,5 @@
+tools/node_modules/
+android/build/
+android/*.jks
+dist/*.idsig
+android/app/assets/
