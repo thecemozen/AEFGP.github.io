@@ -704,7 +704,7 @@ const TYPE_INFO = [
   ['Etek / kenarlık', 0x3fb8af], ['Boş hareket', 0x7aa7ff], ['Üst yüzey', 0xff4f8b], ['Destek', 0x46a35e],
   ['Destek arayüzü', 0x2e7d4a], ['Köprü', 0x4f8bd6], ['Ütüleme', 0xffb3c7], ['Temizleme kulesi', 0x9aa3ad],
 ];
-const PV = 8;
+const PV = 10;
 
 function buildJob() {
   const S = Object.assign({}, state.printer.values, state.process.values);
@@ -770,19 +770,91 @@ function startWorker(w, job) {
   worker.postMessage({ type: 'slice', job }, transfer);
 }
 
+// Önizleme: her ekstrüzyon hareketi, gerçek genişlik ve yükseklikte, kesiti baklava biçimli bir prizma.
+// Köşe normalleri sayesinde ışıkla yuvarlak bir ekstrüzyon gibi görünür. Çok büyük işlerde çizgiye düşer.
+const RIBBON_LIMIT = 600000;
+function buildPreview(res) {
+  const pv = res.preview, nSeg = pv.length / PV;
+  const isTravel = (i) => pv[i * PV + 6] === 5 || pv[i * PV + 8] <= 0;
+  let nEx = 0;
+  for (let i = 0; i < nSeg; i++) if (!isTravel(i)) nEx++;
+  const group = new THREE.Group();
+  // katman başına çizim aralıkları (segment indeksleri -> şerit ve boş hareket sayaçları)
+  const exAt = new Uint32Array(nSeg + 1), trAt = new Uint32Array(nSeg + 1);
+  for (let i = 0; i < nSeg; i++) { exAt[i + 1] = exAt[i] + (isTravel(i) ? 0 : 1); trAt[i + 1] = trAt[i] + (isTravel(i) ? 1 : 0); }
+  const solid = nEx <= RIBBON_LIMIT;
+  let exMesh = null;
+  if (solid) {
+    const V = 8, pos = new Float32Array(nEx * V * 3), nrm = new Int8Array(nEx * V * 3), col = new Uint8Array(nEx * V * 3);
+    const idx = new Uint32Array(nEx * 24);
+    let k = 0;
+    // kesit: 0 sol, 1 üst, 2 sağ, 3 alt (başta), 4-7 aynı (sonda)
+    const quads = [[0, 1], [1, 2], [2, 3], [3, 0]];
+    for (let i = 0; i < nSeg; i++) {
+      if (isTravel(i)) continue;
+      const o = i * PV;
+      let x1 = pv[o], y1 = pv[o + 1], z1 = pv[o + 2], x2 = pv[o + 3], y2 = pv[o + 4], z2 = pv[o + 5];
+      const w = pv[o + 8], h = pv[o + 9];
+      let dx = x2 - x1, dy = y2 - y1;
+      const L = Math.hypot(dx, dy) || 1e-6; dx /= L; dy /= L;
+      const ext = w * 0.45; // uçları uzat: köşelerde boşluk kalmasın
+      x1 -= dx * ext; y1 -= dy * ext; x2 += dx * ext; y2 += dy * ext;
+      const nx = -dy * w / 2, ny = dx * w / 2;
+      const ends = [[x1, y1, z1], [x2, y2, z2]];
+      const vb = k * V;
+      ends.forEach(([x, y, z], e) => {
+        const zc = z - h / 2;
+        const vs = [[x + nx, y + ny, zc], [x, y, z], [x - nx, y - ny, zc], [x, y, z - h]];
+        const ns = [[-dy, dx, 0], [0, 0, 1], [dy, -dx, 0], [0, 0, -1]];
+        for (let j = 0; j < 4; j++) {
+          const vi = (vb + e * 4 + j) * 3;
+          pos[vi] = vs[j][0]; pos[vi + 1] = vs[j][1]; pos[vi + 2] = vs[j][2];
+          nrm[vi] = Math.round(ns[j][0] * 127); nrm[vi + 1] = Math.round(ns[j][1] * 127); nrm[vi + 2] = Math.round(ns[j][2] * 127);
+        }
+      });
+      const ib = k * 24;
+      quads.forEach(([a, b2], q) => {
+        const A = vb + a, B = vb + b2, C = vb + 4 + b2, D = vb + 4 + a;
+        idx.set([A, B, C, A, C, D], ib + q * 6);
+      });
+      k++;
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setAttribute('normal', new THREE.BufferAttribute(nrm, 3, true));
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3, true));
+    g.setIndex(new THREE.BufferAttribute(idx, 1));
+    exMesh = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true }));
+  } else {
+    const pos = new Float32Array(nEx * 6), col = new Uint8Array(nEx * 6);
+    let k = 0;
+    for (let i = 0; i < nSeg; i++) { if (isTravel(i)) continue; pos.set(pv.subarray(i * PV, i * PV + 6), k * 6); k++; }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3, true));
+    exMesh = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ vertexColors: true }));
+  }
+  group.add(exMesh);
+  let trMesh = null;
+  const nTr = nSeg - nEx;
+  if (nTr) {
+    const pos = new Float32Array(nTr * 6); let k = 0;
+    for (let i = 0; i < nSeg; i++) if (isTravel(i)) { pos.set(pv.subarray(i * PV, i * PV + 6), k * 6); k++; }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    trMesh = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0x7aa7ff, transparent: true, opacity: 0.6 }));
+    group.add(trMesh);
+  }
+  group.userData = { solid, exMesh, trMesh, exAt, trAt, layerIndex: res.layerIndex.concat([nSeg]), perEx: solid ? 24 : 2, perVert: solid ? 8 : 2 };
+  return group;
+}
+
 function onResult(res) {
   result = res;
   result.name = gcodeName();
   clearPreviewObj();
-  const pv = res.preview, nSeg = pv.length / PV;
-  const pos = new Float32Array(nSeg * 6);
-  for (let i = 0; i < nSeg; i++) pos.set(pv.subarray(i * PV, i * PV + 6), i * 6);
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(nSeg * 6), 3));
-  preview = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ vertexColors: true }));
-  preview.userData.layerIndex = res.layerIndex.concat([nSeg]);
+  preview = buildPreview(res);
   scene.add(preview);
+  if (!preview.userData.solid) toast('Model çok büyük; önizleme hafıza için çizgi olarak gösteriliyor.');
   const multi = res.stats.usedSlots && res.stats.usedSlots.length > 1;
   if (multi && state.colorBy !== 'slot') { state.colorBy = 'slot'; saveState(); }
   refreshPreviewColors();
@@ -805,24 +877,28 @@ function onResult(res) {
 
 function refreshPreviewColors() {
   if (!preview || !result) return;
-  const pv = result.preview, nSeg = pv.length / PV;
-  const col = preview.geometry.attributes.color.array;
+  const pv = result.preview, nSeg = pv.length / PV, U = preview.userData;
+  const col = U.exMesh.geometry.attributes.color.array, per = U.perVert;
   const bySlot = state.colorBy === 'slot';
   const tcols = TYPE_INFO.map(t => new THREE.Color(t[1]));
   const scols = state.slots.map(s => new THREE.Color(s.color));
+  let k = 0;
   for (let i = 0; i < nSeg; i++) {
-    const t = pv[i * PV + 6], sl = pv[i * PV + 7];
-    const c = bySlot ? (t === 5 ? tcols[5] : (scols[sl] || scols[0])) : (tcols[t] || tcols[0]);
-    col[i * 6] = col[i * 6 + 3] = c.r; col[i * 6 + 1] = col[i * 6 + 4] = c.g; col[i * 6 + 2] = col[i * 6 + 5] = c.b;
+    const t = pv[i * PV + 6];
+    if (t === 5 || pv[i * PV + 8] <= 0) continue;
+    const c = bySlot ? (scols[pv[i * PV + 7]] || scols[0]) : (tcols[t] || tcols[0]);
+    const r = Math.round(c.r * 255), g = Math.round(c.g * 255), b = Math.round(c.b * 255);
+    for (let v = 0; v < per; v++) { const o = (k * per + v) * 3; col[o] = r; col[o + 1] = g; col[o + 2] = b; }
+    k++;
   }
-  preview.geometry.attributes.color.needsUpdate = true;
+  U.exMesh.geometry.attributes.color.needsUpdate = true;
   buildLegend();
 }
 function buildLegend() {
   const lg = $('legend');
   if (!result) { lg.hidden = true; return; }
   const pv = result.preview, present = new Set(), slots = new Set();
-  for (let i = 6; i < pv.length; i += PV) { present.add(pv[i]); slots.add(pv[i + 1]); }
+  for (let i = 6; i < pv.length; i += PV) { present.add(pv[i]); if (pv[i] !== 5) slots.add(pv[i + 1]); }
   const hex = (n) => '#' + n.toString(16).padStart(6, '0');
   lg.innerHTML = state.colorBy === 'slot'
     ? [...slots].sort().map(s => `<div><i style="background:${state.slots[s].color}"></i>Yuva ${s + 1}: ${escapeHtml(state.slots[s].name)}</div>`).join('')
@@ -834,9 +910,11 @@ $('colorBy').addEventListener('change', () => { state.colorBy = $('colorBy').val
 function updateLayer() {
   if (!preview) return;
   const li = parseInt($('layer').value, 10);
-  const idx = preview.userData.layerIndex;
-  const start = $('onlyLayer').checked ? idx[li] : 0;
-  preview.geometry.setDrawRange(start * 2, (idx[li + 1] - start) * 2);
+  const U = preview.userData, idx = U.layerIndex;
+  const s0 = $('onlyLayer').checked ? idx[li] : 0, s1 = idx[li + 1];
+  const e0 = U.exAt[s0], e1 = U.exAt[s1];
+  U.exMesh.geometry.setDrawRange(e0 * U.perEx, (e1 - e0) * U.perEx);
+  if (U.trMesh) { const t0 = U.trAt[s0], t1 = U.trAt[s1]; U.trMesh.geometry.setDrawRange(t0 * 2, (t1 - t0) * 2); }
   $('layerNum').textContent = li + 1;
   $('layerZ').textContent = result.layerZ[li].toFixed(2);
 }
@@ -852,7 +930,7 @@ window.addEventListener('keydown', e => {
   if (e.key === 'ArrowDown') { r.value = Math.max(0, +r.value - 1); updateLayer(); e.preventDefault(); }
 });
 
-function clearPreviewObj() { if (preview) { scene.remove(preview); preview.geometry.dispose(); preview = null; } }
+function clearPreviewObj() { if (preview) { scene.remove(preview); preview.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); }); preview = null; } }
 function clearPreview() {
   clearPreviewObj();
   result = null;

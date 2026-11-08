@@ -19,7 +19,7 @@
 
   // Önizleme hareket türleri
   var T = { OUTER: 0, INNER: 1, SOLID: 2, SPARSE: 3, SKIRT: 4, TRAVEL: 5, TOP: 6, SUPPORT: 7, IFACE: 8, BRIDGE: 9, IRON: 10, TOWER: 11 };
-  var PV = 8; // önizleme kaydı başına sayı: x1 y1 z1 x2 y2 z2 tür yuva
+  var PV = 10; // önizleme kaydı başına sayı: x1 y1 z1 x2 y2 z2 tür yuva genişlik yükseklik
 
   // ---------------------------------------------------------------- Clipper yardımcıları
   function clipperOp(type, subj, clip) {
@@ -601,7 +601,7 @@
       out.push('G0 X' + f3(x) + ' Y' + f3(y) + ' F' + Math.round(spd * 60));
       curF = spd;
       stats.time += moveTime(d, spd, Math.min(S.accelTravel, S.machineMaxAccel)); // süre, sonraki yolun türüne yazılır
-      if (S.previewTravel) preview.push(pos.x, pos.y, pos.z, x, y, pos.z, T.TRAVEL, extruder);
+      if (S.previewTravel) preview.push(pos.x, pos.y, pos.z, x, y, pos.z, T.TRAVEL, extruder, 0, 0);
       pos.x = x; pos.y = y;
     }
     // pts: [[x,y]] ya da spiral için [[x,y,z]]
@@ -656,7 +656,7 @@
         var line = 'G1 X' + f3(x) + ' Y' + f3(y) + (z !== pos.z ? ' Z' + f3(z) : '') + ' E' + f5(e);
         if (first || sp !== curF) { line += ' F' + Math.round(sp * 60); curF = sp; first = false; }
         out.push(line);
-        preview.push(pos.x, pos.y, pos.z, x, y, z, type, extruder);
+        preview.push(pos.x, pos.y, pos.z, x, y, z, type, extruder, width, height);
         pos.x = x; pos.y = y; pos.z = z;
       }
       addTime(type, pathTime(seg, sp, Math.min(accel || S.accelDefault, S.machineMaxAccel)));
