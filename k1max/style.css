@@ -184,7 +184,7 @@ body[data-tab="device"] .panel [data-sec="device"] { display: block; }
   .layerbar .chk { font-size: 12px; }
   input[type=range] { height: 32px; }
   .stats { font-size: 12px; padding: 6px 16px; }
-  .legend { font-size: 11px; padding: 6px 8px; }
+  .legend { font-size: 11px; padding: 6px 8px; top: auto; bottom: 8px; max-height: 40%; }
   .viewbtns { top: 8px; right: 8px; }
   .viewbtns .btn.small { padding: 6px 9px; font-size: 13px; }
   .busy { min-width: 0; width: calc(100% - 32px); }

@@ -3,6 +3,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { CATEGORIES, SLOT_COLORS, SLOT_COUNT } from './presets.js';
 import { load3MF } from './threemf.js';
+import { K1MAX_BED_STL_B64 } from './bed-model.js';
 
 const $ = (id) => document.getElementById(id);
 const STORE_KEY = 'k1max-slicer-v2';
@@ -93,6 +94,7 @@ function renderSettings() {
   const C = CATEGORIES[cat];
   const w = working(cat);
   document.querySelectorAll('#cats button').forEach(b => b.classList.toggle('on', b.dataset.cat === cat));
+  $('bedCard').hidden = cat !== 'printer';
   const fs = $('filSlots');
   fs.innerHTML = '';
   if (cat === 'filament') {
@@ -290,6 +292,15 @@ $('resetAll').addEventListener('click', async () => {
   state = loadState(); renderAll(); buildBed(); placeAll(); toast('Varsayılan K1 Max ayarlarına dönüldü.');
 });
 
+$('bedTexFile').addEventListener('change', async (e) => {
+  const f = e.target.files[0]; e.target.value = '';
+  if (!f) return;
+  const url = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(f); });
+  try { localStorage.setItem(BED_TEX_KEY, url); buildBed(); toast('Tabla dokusu güncellendi.'); }
+  catch (err) { toast('Resim çok büyük, saklanamadı. Daha küçük bir resim deneyin (en fazla ~4 MB).', true); }
+});
+$('bedTexReset').addEventListener('click', () => { try { localStorage.removeItem(BED_TEX_KEY); } catch (e) { /* yok */ } buildBed(); });
+
 // ================================================================= Model sekmesi: hızlı seçim ve yuvalar
 function renderQuick() {
   fillPresetSelect($('qPrinter'), 'printer', state.printer.name);
@@ -345,23 +356,87 @@ const bedSize = () => ({ x: state.printer.values.bedX, y: state.printer.values.b
 
 function themeColors() {
   const dark = matchMedia('(prefers-color-scheme: dark)').matches;
-  return dark ? { bed: 0x23282f, grid: 0x3a414c, grid2: 0x2d333c, bg: 0x0f1216 } : { bed: 0xdfe3e9, grid: 0xb8bfca, grid2: 0xccd2da, bg: 0xe9ecf1 };
+  return dark ? { bg: 0x2a2c30, vol: 0x45484f } : { bg: 0xd7dade, vol: 0xb4b9c1 };
 }
-let bedGroup;
+const BED_TEX_KEY = 'k1max-bed-texture';
+let bedGroup, bedPlateGeom = null, gridTexture = null;
+
+// K1 Max tabla modeli (yüklediğiniz STL): merkezi orijinde, üst yüzeyi z=0
+function k1PlateGeometry() {
+  if (!bedPlateGeom) {
+    const bin = atob(K1MAX_BED_STL_B64);
+    const u8 = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    bedPlateGeom = new STLLoader().parse(u8.buffer);
+    bedPlateGeom.computeVertexNormals();
+  }
+  return bedPlateGeom;
+}
+// Creality Print tarzı ızgara: 10 mm ince, 50 mm kalın çizgi, kesişimlerde nokta
+function gridCanvasTexture(bx, by) {
+  const ppm = 2048 / Math.max(bx, by);
+  const cv = document.createElement('canvas');
+  cv.width = Math.round(bx * ppm); cv.height = Math.round(by * ppm);
+  const g = cv.getContext('2d');
+  const X = (mm) => mm * ppm, Y = (mm) => cv.height - mm * ppm;
+  const line = (x0, y0, x1, y1, w, a) => { g.strokeStyle = `rgba(255,255,255,${a})`; g.lineWidth = w; g.beginPath(); g.moveTo(X(x0), Y(y0)); g.lineTo(X(x1), Y(y1)); g.stroke(); };
+  for (let x = 0; x <= bx + 0.01; x += 10) line(x, 0, x, by, x % 50 === 0 ? 2.6 : 1.4, x % 50 === 0 ? 0.24 : 0.12);
+  for (let y = 0; y <= by + 0.01; y += 10) line(0, y, bx, y, y % 50 === 0 ? 2.6 : 1.4, y % 50 === 0 ? 0.24 : 0.12);
+  g.fillStyle = 'rgba(255,255,255,0.55)';
+  for (let x = 50; x < bx; x += 50) for (let y = 50; y < by; y += 50) { g.beginPath(); g.arc(X(x), Y(y), 4, 0, Math.PI * 2); g.fill(); }
+  g.strokeStyle = 'rgba(255,255,255,0.35)'; g.lineWidth = 4; g.strokeRect(2, 2, cv.width - 4, cv.height - 4);
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return t;
+}
+function bedTexture(bx, by, cb) {
+  let custom = null;
+  try { custom = localStorage.getItem(BED_TEX_KEY); } catch (e) { /* yok */ }
+  if (custom) {
+    new THREE.TextureLoader().load(custom, t => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = renderer.capabilities.getMaxAnisotropy(); cb(t, true); },
+      undefined, () => cb(gridCanvasTexture(bx, by), false));
+  } else cb(gridCanvasTexture(bx, by), false);
+}
+
 function buildBed() {
-  if (bedGroup) scene.remove(bedGroup);
+  if (bedGroup) { scene.remove(bedGroup); if (gridTexture) gridTexture.dispose(); }
   const c = themeColors(), B = bedSize();
   scene.background = new THREE.Color(c.bg);
   bedGroup = new THREE.Group();
-  const plate = new THREE.Mesh(new THREE.PlaneGeometry(B.x, B.y), new THREE.MeshStandardMaterial({ color: c.bed, roughness: 0.9 }));
-  plate.position.set(B.x / 2, B.y / 2, -0.05);
+  const isK1 = B.x === 300 && B.y === 300;
+  // tabla gövdesi
+  const plateMat = new THREE.MeshStandardMaterial({ color: 0x3a3d43, roughness: 0.75, metalness: 0.25 });
+  let plate;
+  if (isK1) {
+    plate = new THREE.Mesh(k1PlateGeometry(), plateMat);
+    plate.position.set(B.x / 2, B.y / 2, 0);
+  } else {
+    plate = new THREE.Mesh(new THREE.BoxGeometry(B.x + 10, B.y + 10, 1), plateMat);
+    plate.position.set(B.x / 2, B.y / 2, -0.5);
+  }
   bedGroup.add(plate);
-  const pts = [];
-  for (let i = 0; i <= B.x; i += 10) pts.push(i, 0, 0, i, B.y, 0);
-  for (let j = 0; j <= B.y; j += 10) pts.push(0, j, 0, B.x, j, 0);
-  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
-  bedGroup.add(new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: c.grid2 })));
-  bedGroup.add(new THREE.Box3Helper(new THREE.Box3(new THREE.Vector3(0, 0, 0), new THREE.Vector3(B.x, B.y, B.z)), c.grid));
+  // ızgara / doku: baskı alanının üstüne ince bir katman
+  const top = new THREE.Mesh(new THREE.PlaneGeometry(B.x, B.y),
+    new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
+  top.position.set(B.x / 2, B.y / 2, 0.01);
+  top.renderOrder = 1;
+  bedGroup.add(top);
+  bedTexture(B.x, B.y, (t, custom) => {
+    gridTexture = t; top.material.map = t;
+    if (custom) { top.material.transparent = false; top.material.color.set(0xffffff); }
+    top.material.needsUpdate = true;
+  });
+  // eksen göstergesi (0,0 noktası)
+  const ax = (x, y, z, col) => {
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0.05, x, y, z + 0.05], 3));
+    bedGroup.add(new THREE.Line(g, new THREE.LineBasicMaterial({ color: col })));
+  };
+  ax(25, 0, 0, 0xe5484d); ax(0, 25, 0, 0x2fbf6c); ax(0, 0, 25, 0x4b82f5);
+  // baskı hacmi (soluk)
+  const vol = new THREE.Box3Helper(new THREE.Box3(new THREE.Vector3(0, 0, 0), new THREE.Vector3(B.x, B.y, B.z)), c.vol);
+  vol.material.transparent = true; vol.material.opacity = 0.35;
+  bedGroup.add(vol);
   scene.add(bedGroup);
 }
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', buildBed);
@@ -376,7 +451,8 @@ new ResizeObserver(resize).observe(wrap);
 renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
 
 function setView(v) {
-  const t = controls.target, r = viewRadius;
+  // dikey (telefon) ekranda yatay görüş daraldığı için uzaklaş
+  const t = controls.target, r = viewRadius / Math.min(1, camera.aspect) * (parts.length ? 1 : 1.1);
   if (v === 'top') camera.position.set(t.x, t.y - 0.01, t.z + r);
   else if (v === 'front') camera.position.set(t.x, t.y - r, t.z + 20);
   else camera.position.set(t.x - r * 0.45, t.y - r * 0.6, t.z + r * 0.5);
@@ -1055,7 +1131,7 @@ function setTab(tab) {
   if (tab === 'view' && isDesktop()) return; // masaüstünde görünüm hep açık
   document.body.dataset.tab = tab;
   document.querySelectorAll('.tabs button, .ptabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
-  if (tab === 'view') requestAnimationFrame(resize);
+  if (tab === 'view') requestAnimationFrame(() => { resize(); if (!parts.length) setView('iso'); });
   if (tab === 'device' && dev.connected) pollStatus();
   if (tab === 'device' && !dev.connected && state.printer.values.hostIp) connect(true);
 }

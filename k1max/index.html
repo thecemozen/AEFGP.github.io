@@ -101,6 +101,15 @@
           <button class="btn small" id="pReset">Geri al</button>
         </div>
       </div>
+      <section class="card" id="bedCard" hidden>
+        <h2>Tabla görünümü</h2>
+        <p class="hint">Önizlemede K1 Max tablası gösterilir. Kendi doku resminizi (PNG/JPG, 300×300 mm alana yayılır) yükleyebilirsiniz.</p>
+        <div class="btn-row">
+          <label class="btn small" for="bedTexFile">Doku resmi yükle</label>
+          <button class="btn small" id="bedTexReset">Varsayılan ızgara</button>
+        </div>
+        <input id="bedTexFile" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+      </section>
       <div class="searchrow">
         <input id="search" type="search" placeholder="Ayar ara…">
         <label class="chk"><input type="checkbox" id="advanced"> Gelişmiş</label>
