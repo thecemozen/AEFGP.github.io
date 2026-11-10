@@ -1320,6 +1320,7 @@ async function connect(silent) {
       $('devHint').innerHTML = `Bağlandı: <b>${escapeHtml(ip)}:${port}</b> · Klipper: ${escapeHtml(info.klippy_state || '?')}`;
       $('devStatusCard').hidden = false;
       pollStatus(); startPolling();
+      learnFromHistory();
       updateButtons();
       return true;
     } catch (e) {
@@ -1379,6 +1380,50 @@ async function printerCmd(path, okMsg) {
   } catch (e) { toast('Komut gönderilemedi: ' + e.message, true); }
   setTimeout(pollStatus, 800);
 }
+// ---------------- süre tahminini yazıcının baskı geçmişinden öğren
+let learned = null;
+async function learnFromHistory() {
+  try {
+    const r = await http('GET', dev.base + '/server/history/list?limit=100&order=desc', { timeout: 6000 });
+    const jobs = ((json(r) || {}).result || {}).jobs || [];
+    const pv = state.printer.values, curScale = +pv.timeScale || 1, curStart = +pv.startupTime || 0;
+    // yalnızca bu dilimleyiciyle dilimlenmiş, tamamlanmış baskılar
+    const pts = jobs.filter(j => j.status === 'completed' && j.metadata && /K1MaxDilimleyici/i.test(j.metadata.slicer || '') &&
+      j.metadata.estimated_time > 60 && j.print_duration > 60)
+      .map(j => ({ est: (j.metadata.estimated_time - curStart) / curScale, act: j.print_duration, name: j.filename }));
+    $('learnCard').hidden = false;
+    if (pts.length < 2) {
+      $('learnHint').textContent = pts.length ? '1 baskı bulundu; öğrenmek için en az 2 tamamlanmış baskı gerekiyor.' : 'Bu dilimleyiciyle basılmış tamamlanmış baskı henüz yok. Birkaç baskıdan sonra tahmin kendini düzeltebilecek.';
+      $('learnApply').hidden = true; learned = null; return;
+    }
+    // gerçek = a × ham tahmin + b (en küçük kareler); az veri ya da tutarsızlıkta yalnızca oran
+    let a, b = 0;
+    const n = pts.length, mx = pts.reduce((s2, p) => s2 + p.est, 0) / n, my = pts.reduce((s2, p) => s2 + p.act, 0) / n;
+    const sxx = pts.reduce((s2, p) => s2 + (p.est - mx) ** 2, 0), sxy = pts.reduce((s2, p) => s2 + (p.est - mx) * (p.act - my), 0);
+    if (n >= 3 && sxx > 1e-6) { a = sxy / sxx; b = my - a * mx; }
+    if (!(n >= 3) || !(a > 0.4 && a < 3) || b < 0 || b > 1200) {
+      const ratios = pts.map(p => p.act / p.est).sort((x, y) => x - y); a = ratios[Math.floor(n / 2)]; b = 0;
+    }
+    a = Math.min(3, Math.max(0.3, a)); b = Math.min(1200, Math.max(0, b));
+    const errNow = pts.reduce((s2, p) => s2 + ((p.est * curScale + curStart) / p.act - 1), 0) / n * 100;
+    const errNew = pts.reduce((s2, p) => s2 + (Math.abs((p.est * a + b) / p.act - 1)), 0) / n * 100;
+    learned = { a: Math.round(a * 1000) / 1000, b: Math.round(b) };
+    $('learnHint').innerHTML = `${n} tamamlanmış baskıya göre şu anki tahmin ortalama <b>%${Math.abs(errNow).toFixed(0)} ${errNow < 0 ? 'kısa' : 'uzun'}</b> kalıyor. ` +
+      `Düzeltmeyle ortalama hata yaklaşık %${errNew.toFixed(0)} olur (oran ×${learned.a}, sabit ek ${Math.round(learned.b / 60)} dk).`;
+    $('learnApply').hidden = Math.abs(learned.a - curScale) < 0.01 && Math.abs(learned.b - curStart) < 30;
+  } catch (e) { $('learnCard').hidden = true; }
+}
+$('learnApply').addEventListener('click', () => {
+  if (!learned) return;
+  state.printer.values.timeScale = learned.a; state.printer.values.startupTime = learned.b;
+  saveState(); renderSettings(); invalidate(); $('learnApply').hidden = true;
+  toast('Süre tahmini düzeltildi. Yeni dilimlemelerde geçerli.');
+});
+$('learnReset').addEventListener('click', () => {
+  state.printer.values.timeScale = 1; state.printer.values.startupTime = 0;
+  saveState(); renderSettings(); invalidate(); learnFromHistory(); toast('Süre tahmini düzeltmesi sıfırlandı.');
+});
+
 $('devPause').addEventListener('click', () => printerCmd('/printer/print/pause', 'Duraklatılıyor…'));
 $('devResume').addEventListener('click', () => printerCmd('/printer/print/resume', 'Devam ediliyor…'));
 $('devCancel').addEventListener('click', async () => {

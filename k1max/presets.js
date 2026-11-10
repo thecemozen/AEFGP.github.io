@@ -73,6 +73,10 @@ export const PRINTER_SCHEMA = [
     { k: 'apiKey', l: 'API anahtarı', t: 'x', tip: 'Moonraker yetkilendirme kullanıyorsanız. Genelde boş.', adv: true },
     { k: 'uploadFolder', l: 'Yükleme klasörü', t: 'x', tip: 'gcodes içinde alt klasör (boş = kök).', adv: true },
   ]},
+  { g: 'Süre tahmini (öğrenilen)', adv: true, items: [
+    { k: 'timeScale', l: 'Öğrenilen süre oranı', u: '×', t: 'n', min: 0.3, max: 3, s: 0.01, tip: 'Cihaz sekmesindeki "Tahmini düzelt" ile yazıcının baskı geçmişinden hesaplanır.' },
+    { k: 'startupTime', l: 'Sabit ek süre (ısınma vb.)', u: 'sn', t: 'n', min: 0, max: 1800, s: 10 },
+  ]},
 ];
 
 export const PRINTER_BASE = {
@@ -82,7 +86,7 @@ export const PRINTER_BASE = {
   toolChangeLift: 2, toolChangeTime: 45, changeFilamentGcode: CHANGE_GCODE,
   startGcode: START_GCODE, endGcode: END_GCODE, layerChangeGcode: '',
   labelObjects: false, thumbnail: true, thumbnailSize: 300,
-  hostIp: '', hostPort: 7125, apiKey: '', uploadFolder: '',
+  hostIp: '', hostPort: 7125, apiKey: '', uploadFolder: '', timeScale: 1, startupTime: 0,
 };
 
 export const PRINTER_PRESETS = {
