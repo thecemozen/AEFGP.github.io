@@ -195,6 +195,11 @@ export const PROCESS_SCHEMA = [
     { k: 'ironingInset', l: 'Kenardan içeri', u: 'mm', t: 'n', min: 0, max: 2, s: 0.05, adv: true },
     { k: 'ironingSpeed', l: 'Ütüleme hızı', u: 'mm/s', t: 'n', min: 5, max: 300, s: 5 },
   ]},
+  { g: 'İnce duvarlar ve boşluklar', sec: 'Kalite', items: [
+    { k: 'gapFill', l: 'Boşluk doldurma ve ince duvarlar', t: 'b', tip: 'Duvarların ve dolgunun kapatamadığı dar boşluklar ile tek duvarın sığmadığı ince detaylar (yazı, kanat, ince kenar), değişken genişlikte tek çizgiyle basılır.' },
+    { k: 'gapFillMin', l: 'En dar boşluk', u: 'mm', t: 'n', min: 0.05, max: 0.4, s: 0.01, tip: 'Bundan dar boşluklar doldurulmaz.', adv: true },
+    { k: 'gapFillSpeed', l: 'Boşluk doldurma hızı', u: 'mm/s', t: 'n', min: 10, max: 400, s: 5 },
+  ]},
   { g: 'Duvarlar', sec: 'Dayanıklılık', items: [
     { k: 'wallLoops', l: 'Duvar sayısı', t: 'n', min: 1, max: 20, s: 1 },
     { k: 'wallOrder', l: 'Duvar sırası', t: 's', o: { 'inner-outer': 'İç → Dış (yüzey kalitesi)', 'outer-inner': 'Dış → İç (ölçü hassasiyeti)' } },
@@ -294,7 +299,7 @@ export const PROCESS_BASE = {
   seam: 'aligned', seamGap: 10,
   xyContourCompensation: 0, xyHoleCompensation: 0, elephantFoot: 0.1,
   ironing: 'none', ironingFlow: 10, ironingSpacing: 0.15, ironingInset: 0.2, ironingSpeed: 30,
-  wallLoops: 2, wallOrder: 'inner-outer',
+  wallLoops: 2, wallOrder: 'inner-outer', gapFill: true, gapFillMin: 0.1, gapFillSpeed: 150,
   topLayers: 5, topThickness: 0.8, topPattern: 'monotonic', topAngleMode: 'auto', topAngle: 0, topFlow: 1.0,
   bottomLayers: 3, bottomThickness: 0, bottomPattern: 'monotonic',
   infillDensity: 15, infillPattern: 'grid', helixStep: 15, infillJoin: false, infillEvery: 1, infillAngle: 45, solidAngle: 45, infillOverlap: 15, minSparseArea: 15,

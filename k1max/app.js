@@ -732,7 +732,7 @@ let preview = null;
 const TYPE_INFO = [
   ['Dış duvar', 0xff8a3d], ['İç duvar', 0xffd23f], ['Katı dolgu', 0xb34ddb], ['Seyrek dolgu', 0xd9534f],
   ['Etek / kenarlık', 0x3fb8af], ['Boş hareket', 0x7aa7ff], ['Üst yüzey', 0xff4f8b], ['Destek', 0x46a35e],
-  ['Destek arayüzü', 0x2e7d4a], ['Köprü', 0x4f8bd6], ['Ütüleme', 0xffb3c7], ['Temizleme kulesi', 0x9aa3ad],
+  ['Destek arayüzü', 0x2e7d4a], ['Köprü', 0x4f8bd6], ['Ütüleme', 0xffb3c7], ['Temizleme kulesi', 0x9aa3ad], ['Boşluk doldurma', 0xf0f0f0],
 ];
 const PV = 11;
 
