@@ -347,6 +347,12 @@ export const PROCESS_PRESETS = {
     outerWallSpeed: 150, innerWallSpeed: 250, topSurfaceSpeed: 150 },
   '0.16 mm Optimal': { layerHeight: 0.16, firstLayerHeight: 0.2, wallLoops: 2, topLayers: 6, bottomLayers: 4 },
   '0.20 mm Standart': {},
+  // Tüm süre kazandıranlar bir arada: uyarlanabilir katman, hızlı dolgu deseni + birleştirme, kalın dolgu çizgisi,
+  // yüksek iç ivmeler. Dış duvar ve üst yüzey hız/ivmesi kalite için standart profildeki gibi kalır.
+  'Hızlı baskı (uyarlanabilir 0.10–0.28)': { adaptiveLayers: true, adaptiveMinH: 0.1, adaptiveMaxH: 0.28, adaptiveQuality: 40,
+    infillPattern: 'speed', infillJoin: true, infillDensity: 12, sparseLineWidth: 0.5, innerWallLineWidth: 0.48,
+    topLayers: 4, topThickness: 0.8, bottomLayers: 3, bottomThickness: 0.6,
+    innerWallSpeed: 330, sparseInfillSpeed: 320, solidInfillSpeed: 270, accelInnerWall: 12000, accelInfill: 15000, accelTravel: 15000, travelSpeed: 600 },
   '0.20 mm Hızlı dolgu (deneysel)': { infillPattern: 'speed', infillJoin: true, infillEvery: 2 },
   '0.20 mm Sağlam': { wallLoops: 4, topLayers: 6, bottomLayers: 4, infillDensity: 35, infillPattern: 'gyroid' },
   '0.24 mm Taslak': { layerHeight: 0.24, firstLayerHeight: 0.24, topLayers: 4, bottomLayers: 3, lineWidth: 0.45, innerWallLineWidth: 0.45, sparseLineWidth: 0.5 },

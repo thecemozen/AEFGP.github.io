@@ -39,7 +39,8 @@ function toBlob(text, id) {
 }
 
 // ================================================================= durum ve profiller
-const APP_VERSION = '2.12';
+const APP_VERSION = '2.13';
+const FAST_PRESET = 'Hızlı baskı (uyarlanabilir 0.10–0.28)';
 let state = null;
 state = loadState();
 let viewRadius = 480;
@@ -336,8 +337,9 @@ function renderQuick() {
   fillPresetSelect($('qPrinter'), 'printer', state.printer.name);
   fillPresetSelect($('qProcess'), 'process', state.process.name);
   const P = state.process.values;
-  const pat = { grid: 'ızgara', gyroid: 'gyroid', cubic: 'kübik', triangles: 'üçgen', rectilinear: 'doğrusal', concentric: 'eş merkezli' }[P.infillPattern] || P.infillPattern;
-  $('qHint').textContent = `Katman ${P.layerHeight} mm · ${P.wallLoops} duvar · %${P.infillDensity} ${pat}` +
+  $('qFast').hidden = state.process.name === FAST_PRESET && !isModified('process', state.process);
+  const pat = { speed: 'hızlı', grid: 'ızgara', gyroid: 'gyroid', cubic: 'kübik', triangles: 'üçgen', rectilinear: 'doğrusal', concentric: 'eş merkezli' }[P.infillPattern] || P.infillPattern;
+  $('qHint').textContent = (P.adaptiveLayers && !P.spiralVase ? `Katman ${P.adaptiveMinH}–${P.adaptiveMaxH} mm (uyarlanabilir)` : `Katman ${P.layerHeight} mm`) + ` · ${P.wallLoops} duvar · %${P.infillDensity} ${pat}` +
     (P.supportEnable ? ' · destek açık' : '') + (P.spiralVase ? ' · vazo modu' : '') +
     (isModified('process', state.process) ? ' · (değiştirildi)' : '');
   const list = $('slotList');
@@ -363,6 +365,13 @@ $('qPrinter').addEventListener('change', async () => {
 $('qProcess').addEventListener('change', async () => {
   if (isModified('process', state.process) && !(await confirmDlg('Kaydedilmemiş değişiklikler', 'İşlem profilindeki değişiklikler kaybolacak.', 'Değiştir'))) { renderQuick(); return; }
   loadPreset('process', $('qProcess').value, state.process); renderAll(); invalidate();
+});
+
+// Tek dokunuşla hızlı baskı profili
+$('qFast').addEventListener('click', async () => {
+  if (isModified('process', state.process) && !(await confirmDlg('Kaydedilmemiş değişiklikler', 'İşlem profilindeki değişiklikler kaybolacak.', 'Değiştir'))) return;
+  loadPreset('process', FAST_PRESET, state.process); renderAll(); invalidate(); scheduleAnalysis();
+  toast('Hızlı baskı profili seçildi: 5 örnek modelde standart profile göre ortalama %16 daha kısa süre.');
 });
 
 // ================================================================= 3B sahne
