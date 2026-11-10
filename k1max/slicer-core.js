@@ -592,6 +592,25 @@
       }
     } else if (seam === 'random') {
       bi = Math.floor(Math.random() * pts.length);
+    } else if (seam === 'corner') {
+      // Dikişi en keskin (tercihen içbükey) köşeye sakla; köşe yoksa önceki katmanın dikişine hizala
+      var n = pts.length, ccw = CL.Clipper.Orientation(path), bestS = -Infinity, bestSharp = 0;
+      var nb = function (i0, dir) { var j = i0; for (var t = 0; t < n; t++) { j = (j + dir + n) % n; if (Math.hypot(pts[j][0] - pts[i0][0], pts[j][1] - pts[i0][1]) >= 0.4) return pts[j]; } return pts[(i0 + dir + n) % n]; };
+      for (i = 0; i < n; i++) {
+        var a = nb(i, -1), c = nb(i, 1), p = pts[i];
+        var v1x = a[0] - p[0], v1y = a[1] - p[1], v2x = c[0] - p[0], v2y = c[1] - p[1];
+        var ang = Math.acos(Math.max(-1, Math.min(1, (v1x * v2x + v1y * v2y) / ((Math.hypot(v1x, v1y) * Math.hypot(v2x, v2y)) || 1))));
+        var sharp = Math.PI - ang;
+        var cross = (p[0] - a[0]) * (c[1] - p[1]) - (p[1] - a[1]) * (c[0] - p[0]);
+        var concave = ccw ? cross < 0 : cross > 0;
+        var dn = Math.hypot(p[0] - near[0], p[1] - near[1]);
+        var sc = sharp * (concave ? 1.5 : 0.8) - dn * 0.01;
+        if (sc > bestS) { bestS = sc; bi = i; bestSharp = sharp; }
+      }
+      if (bestSharp < 0.35) { // belirgin köşe yok: hizala
+        var bd2 = Infinity;
+        for (i = 0; i < n; i++) { var d2 = Math.hypot(pts[i][0] - near[0], pts[i][1] - near[1]); if (d2 < bd2) { bd2 = d2; bi = i; } }
+      }
     } else { // nearest, aligned (aligned için near = önceki katmanın dikişi)
       var bd = Infinity;
       for (i = 0; i < pts.length; i++) {
@@ -945,7 +964,7 @@
         var d = Math.sqrt(dx * dx + dy * dy);
         if (d < 0.005) continue;
         seg.push({ d: d, ux: dx / d, uy: dy / d });
-        var e = d * eArea;
+        var e = d * eArea * (pts[i].length > 3 ? pts[i][3] : 1);
         stats.e[Math.max(0, extruder)] += e;
         var line = 'G1 X' + f3(x) + ' Y' + f3(y) + (z !== pos.z ? ' Z' + f3(z) : '') + ' E' + f5(e);
         if (first || sp !== curF) { line += ' F' + Math.round(sp * 60); curF = sp; first = false; }
@@ -1344,10 +1363,53 @@
         });
         return best;
       }
+      // Çıkıntı sınıfı: 0 = alttaki katman tarafından taşınıyor, 1 = kısmen, 2 = havada
+      var ovh = null;
+      function overhangClass(x, y, w) {
+        if (!ovh) {
+          var below = li > 0 ? job.U[li - 1] : [];
+          var mm = function (paths) { return paths.map(function (p) { return p.map(function (q) { return [q.X / SCALE, q.Y / SCALE]; }); }); };
+          ovh = { s1: mm(offset(below, w * 0.25, false)), s2: mm(offset(below, w * 0.75, false)) };
+        }
+        if (pip(ovh.s1, x, y)) return 0;
+        return pip(ovh.s2, x, y) ? 1 : 2;
+      }
+      // Eğimli (scarf) dikiş: halka alçaktan başlayıp yükselir, sonunda başlangıcın üzerinden azalan akışla geçilir
+      function scarfLoop(pts, zTop, hh) {
+        var Ls = S.scarfLength, f0 = S.scarfStartHeight / 100;
+        var total = 0, i;
+        for (i = 1; i < pts.length; i++) total += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+        if (total < Ls * 2.2) return null;
+        var z0 = zTop - hh * (1 - f0), outp = [[pts[0][0], pts[0][1], z0, 1]];
+        var walk = function (from, to, fn) { // fn(s) -> [z, akış]
+          var acc = 0, steps = Math.max(4, Math.round(Ls / 1.0)), res = [];
+          for (var k = from; k < to; k++) {
+            var a = pts[k], b2 = pts[k + 1], L = Math.hypot(b2[0] - a[0], b2[1] - a[1]);
+            var n = Math.max(1, Math.ceil(L / (Ls / steps)));
+            for (var j = 1; j <= n; j++) { var t = j / n, sAt = acc + L * t, zf = fn(sAt); res.push([a[0] + (b2[0] - a[0]) * t, a[1] + (b2[1] - a[1]) * t, zf[0], zf[1]]); }
+            acc += L;
+            if (acc >= Ls) break;
+          }
+          return res;
+        };
+        // 1) yükselen başlangıç
+        var up = walk(0, pts.length - 1, function (sv) { var r = Math.min(1, sv / Ls); return [z0 + (zTop - z0) * r, f0 + (1 - f0) * r]; });
+        var lenUp = 0; up.forEach(function (q, k) { var pr = k ? up[k - 1] : outp[0]; lenUp += Math.hypot(q[0] - pr[0], q[1] - pr[1]); });
+        outp = outp.concat(up);
+        // 2) halkanın geri kalanı tam yükseklikte (yükselişin bittiği noktadan sonra)
+        var acc2 = 0;
+        for (i = 1; i < pts.length; i++) { acc2 += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); if (acc2 > lenUp + 1e-6) outp.push([pts[i][0], pts[i][1], zTop, 1]); }
+        // 3) başlangıcın üzerinden tekrar: akış azalarak (kama doldurulur)
+        outp = outp.concat(walk(0, pts.length - 1, function (sv) { var r = Math.min(1, sv / Ls); return [zTop, (1 - f0) * (1 - r)]; }));
+        return outp;
+      }
       function emitWall(paths, isOuter, wo, wi) {
         if (!paths.length) return;
         out.push(isOuter ? ';TYPE:Outer wall' : ';TYPE:Inner wall');
         var done = new Uint8Array(paths.length);
+        var w = isOuter ? wo : wi, type = isOuter ? T.OUTER : T.INNER;
+        var acc = first ? S.accelFirst : (isOuter ? S.accelOuterWall : S.accelInnerWall);
+        var baseSp = spd(isOuter ? S.outerWallSpeed : S.innerWallSpeed);
         for (var n2 = 0; n2 < paths.length; n2++) {
           var b = -1, bd = Infinity;
           for (var k = 0; k < paths.length; k++) {
@@ -1358,12 +1420,40 @@
           }
           done[b] = 1;
           var seam = S.seam === 'aligned' ? 'nearest' : S.seam;
-          var near = S.seam === 'aligned' ? lastSeam : [pos.x, pos.y];
+          var near = (S.seam === 'aligned' || S.seam === 'corner') ? lastSeam : [pos.x, pos.y];
           var pts = loopFrom(paths[b], seam, near, bedCx);
           if (isOuter) lastSeam = pts[0];
-          if (isOuter && S.seamGap > 0) pts = trimEnd(pts, S.seamGap / 100 * wo);
-          extrudePath(pts, spd(isOuter ? S.outerWallSpeed : S.innerWallSpeed), isOuter ? wo : wi, h,
-            isOuter ? T.OUTER : T.INNER, first ? S.accelFirst : (isOuter ? S.accelOuterWall : S.accelInnerWall), 1);
+          // çıkıntı sınıfları
+          var cls = null, anyOv = false;
+          if (S.overhangSlowdown && li > 0 && !first) {
+            cls = [];
+            for (var i = 1; i < pts.length; i++) { var c = overhangClass((pts[i][0] + pts[i - 1][0]) / 2, (pts[i][1] + pts[i - 1][1]) / 2, w); cls.push(c); if (c) anyOv = true; }
+          }
+          if (isOuter && !anyOv && S.scarfSeam === 'outer' && !first) {
+            var sc = scarfLoop(pts, Ly.z, h);
+            if (sc) {
+              travel(sc[0][0], sc[0][1]);
+              if (!retracted) out.push('G1 Z' + f3(sc[0][2]) + ' F' + Math.round(S.zSpeed * 60));
+              pos.z = sc[0][2];
+              extrudePath(sc, baseSp, w, h, type, acc, 1, true);
+              pos.z = Ly.z;
+              continue;
+            }
+          }
+          if (isOuter && S.seamGap > 0) { pts = trimEnd(pts, S.seamGap / 100 * wo); if (cls) cls.length = pts.length - 1; }
+          if (!anyOv) { extrudePath(pts, baseSp, w, h, type, acc, 1); continue; }
+          // çıkıntılı bölümleri yavaşlat, havadakilerde fanı artır
+          var spOf = function (c2) { return c2 === 2 ? Math.min(baseSp, S.overhangSpeed) : (c2 === 1 ? Math.min(baseSp, S.overhangSpeedMid) : baseSp); };
+          var hasFull = cls.indexOf(2) >= 0;
+          if (hasFull) setFan(0, Math.max(fanPct(li), num(fil().overhangFan, 100)));
+          var run = [pts[0]], rc = cls[0];
+          for (i = 1; i < pts.length; i++) {
+            var ci = cls[i - 1];
+            if (ci !== rc) { extrudePath(run, spOf(rc), w, h, type, acc, 1, run !== null && run[0] !== pts[0]); run = [pts[i - 1]]; rc = ci; }
+            run.push(pts[i]);
+          }
+          extrudePath(run, spOf(rc), w, h, type, acc, 1, run[0] !== pts[0]);
+          if (hasFull) setFan(0, fanPct(li));
         }
       }
       function emitSpiral(paths, w) {
@@ -1481,7 +1571,7 @@
     // Başlık bloğu: Moonraker/Fluidd dilimleyiciyi "; generated by AD SÜRÜM on TARİH at SAAT" satırından tanır
     var now = new Date(), p2 = function (n) { return (n < 10 ? '0' : '') + n; };
     header.push('; HEADER_BLOCK_START');
-    header.push('; generated by K1MaxDilimleyici 2.3 on ' + now.getFullYear() + '-' + p2(now.getMonth() + 1) + '-' + p2(now.getDate()) +
+    header.push('; generated by K1MaxDilimleyici 2.4 on ' + now.getFullYear() + '-' + p2(now.getMonth() + 1) + '-' + p2(now.getDate()) +
       ' at ' + p2(now.getHours()) + ':' + p2(now.getMinutes()) + ':' + p2(now.getSeconds()));
     header.push('; total layer number: ' + nL);
     header.push('; HEADER_BLOCK_END', '');
