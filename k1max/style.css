@@ -213,3 +213,14 @@ body[data-tab="device"] .panel [data-sec="device"] { display: block; }
 .ana .it.tip { border-left: 3px solid #2fa36b; }
 .ana .it.ok { border-left: 3px solid #7aa7ff; }
 .ana .it button { flex: none; }
+/* önizlemede düzenleme çubuğu */
+.edittools { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); z-index: 3; display: flex; align-items: center; gap: 6px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 6px 8px; box-shadow: 0 6px 18px rgba(0,0,0,.18);
+  max-width: calc(100% - 16px); flex-wrap: wrap; justify-content: center; }
+.edittools .et-name { font-size: 12px; color: var(--muted); max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.edittools .btn { white-space: nowrap; }
+.edittools .et-deg { display: flex; align-items: center; gap: 2px; font-size: 13px; }
+.edittools .et-deg input { width: 58px; }
+.edittools:not([hidden]) ~ .edithint, #editTools:not([hidden]) + .edithint { bottom: 64px; }
+#editHint { bottom: 64px; }
+@media (max-width: 560px) { .edittools { width: calc(100% - 16px); gap: 5px; } .edittools .et-name { flex-basis: 100%; text-align: center; max-width: none; } #editHint { bottom: 112px; } }

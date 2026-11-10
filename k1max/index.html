@@ -69,6 +69,7 @@
           <label class="btn small" for="fileObj" title="Yeni bir nesne olarak tablaya ekler">Nesne ekle</label>
           <label class="btn small" for="fileAdd" title="Seçili nesneye parça ekler (çok renkli modeller için, koordinatlar korunur)">Parça ekle</label>
           <button class="btn small" id="split" title="Birbirine değmeyen gövdeleri ayrı parçalara böler">Parçalara ayır</button>
+          <button class="btn small" id="centerAll" title="Seçili nesneyi ya da tüm nesneleri birlikte tablanın ortasına alır">Ortala</button>
           <button class="btn small" id="arrange" title="Parçaları tablaya yan yana dizer">Yan yana diz</button>
           <button class="btn small" id="saveProject" title="Nesneleri, konumlarını, renk yuvalarını ve ayarları tek bir 3MF dosyasına kaydeder. Aç ile geri yüklenir.">Projeyi kaydet</button>
           <button class="btn small" id="demo2">Örnek</button>
@@ -241,6 +242,15 @@
         <label class="chk"><input type="checkbox" id="showModel" checked> Model</label>
       </div>
       <div class="edithint" id="editHint" hidden>Nesneye dokunarak seçin, sürükleyerek tablada taşıyın.</div>
+      <div class="edittools" id="editTools" hidden>
+        <span class="et-name" id="etName">Tümü</span>
+        <button class="btn small" id="etRotL" title="Z ekseninde 15° sola döndür">⟲ 15°</button>
+        <button class="btn small" id="etRotR" title="Z ekseninde 15° sağa döndür">⟳ 15°</button>
+        <button class="btn small" id="etRot90" title="Z ekseninde 90° döndür">90°</button>
+        <label class="et-deg"><input type="number" id="etDeg" step="1" inputmode="decimal" aria-label="Dönüş açısı"><span>°</span></label>
+        <button class="btn small primary" id="etCenter" title="Tablanın ortasına al">Ortala</button>
+        <button class="btn small" id="etFlat" title="En geniş yüzü tablaya yatır">Yatır</button>
+      </div>
     </div>
     <footer class="layerbar" id="layerbar" hidden>
       <label>Katman <b id="layerNum">0</b> / <span id="layerMax">0</span> · Z <b id="layerZ">0</b> mm</label>

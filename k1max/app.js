@@ -39,7 +39,7 @@ function toBlob(text, id) {
 }
 
 // ================================================================= durum ve profiller
-const APP_VERSION = '2.13';
+const APP_VERSION = '2.14';
 const FAST_PRESET = 'Hızlı baskı (uyarlanabilir 0.10–0.28)';
 let state = null;
 state = loadState();
@@ -593,7 +593,7 @@ function addParts(list, replace, keepCalib, asObject) {
 }
 
 function placeAll() {
-  if (!parts.length) { $('modelInfo').textContent = 'Model yüklenmedi. STL ya da 3MF açın veya buraya sürükleyin.'; $('editHint').hidden = true; updateButtons(false); return; }
+  if (!parts.length) { $('modelInfo').textContent = 'Model yüklenmedi. STL ya da 3MF açın veya buraya sürükleyin.'; $('editHint').hidden = true; $('editTools').hidden = true; updateButtons(false); return; }
   const B = bedSize(), all = new THREE.Box3();
   let tris = 0;
   const objBox = new Map();
@@ -614,7 +614,9 @@ function placeAll() {
   $('modelInfo').innerHTML = `${sx.toFixed(1)} × ${sy.toFixed(1)} × ${sz.toFixed(1)} mm · ${tris.toLocaleString('tr-TR')} üçgen · ${objects.length} nesne, ${parts.length} parça` +
     (fits ? '' : '<br><span class="err">Kırmızı nesne tablanın dışında ya da çok yüksek! Taşıyın veya küçültün.</span>');
   partsGroup.visible = $('showModel').checked || !result;
-  $('editHint').hidden = !partsGroup.visible;
+  $('editHint').hidden = !partsGroup.visible || !!selObj;
+  $('editTools').hidden = !partsGroup.visible;
+  renderEditTools();
   updateButtons(fits);
   scheduleAnalysis();
 }
@@ -684,6 +686,35 @@ $('objRot').addEventListener('change', () => { if (selObj) { selObj.rotZ = (+$('
   else selObj[['sx', 'sy', 'sz'][k]] = v;
   changed3d();
 }));
+// ---------------- önizlemedeki düzenleme çubuğu: derece derece döndürme, ortalama, yatırma
+function renderEditTools() {
+  const o = selObj || objects[0];
+  $('etName').textContent = selObj ? selObj.name : (objects.length > 1 ? `Tümü (${objects.length})` : 'Tümü');
+  if (document.activeElement !== $('etDeg')) $('etDeg').value = o ? Math.round(((o.rotZ * 180 / Math.PI) % 360 + 360) % 360) : 0;
+}
+function rotateBy(deg) { targets().forEach(o => { o.rotZ += deg * Math.PI / 180; }); changed3d(); }
+// seçili nesneyi ya da tüm nesneleri (birlikte) tabla ortasına al
+function centerTargets() {
+  const ts = targets(); if (!ts.length) return;
+  const B = bedSize(), all = new THREE.Box3();
+  ts.forEach(o => { const f = objFootprint(o); all.union(new THREE.Box3(new THREE.Vector3(o.x + f.min.x, o.y + f.min.y, 0), new THREE.Vector3(o.x + f.max.x, o.y + f.max.y, 0))); });
+  const dx = B.x / 2 - (all.min.x + all.max.x) / 2, dy = B.y / 2 - (all.min.y + all.max.y) / 2;
+  ts.forEach(o => { o.x += dx; o.y += dy; });
+  changed3d(); focusModels();
+}
+$('etRotL').addEventListener('click', () => rotateBy(15));
+$('etRotR').addEventListener('click', () => rotateBy(-15));
+$('etRot90').addEventListener('click', () => rotateBy(90));
+$('etDeg').addEventListener('change', () => {
+  const v = (+$('etDeg').value || 0) * Math.PI / 180;
+  targets().forEach(o => { o.rotZ = v; }); changed3d();
+});
+$('etCenter').addEventListener('click', centerTargets);
+$('centerAll').addEventListener('click', centerTargets);
+$('etFlat').addEventListener('click', () => $('layflat').click());
+// çubuktaki dokunuşlar nesne seçimini / sürüklemeyi tetiklemesin
+['pointerdown', 'pointerup', 'click'].forEach(t => $('editTools').addEventListener(t, e => e.stopPropagation()));
+
 $('objCenter').addEventListener('click', () => { if (!selObj) return; const B = bedSize(); selObj.x = B.x / 2; selObj.y = B.y / 2; changed3d(); });
 $('objDrop').addEventListener('click', () => select(null));
 $('objDel').addEventListener('click', () => {

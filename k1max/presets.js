@@ -223,6 +223,7 @@ export const PROCESS_SCHEMA = [
   { g: 'Duvarlar', sec: 'Dayanıklılık', items: [
     { k: 'wallLoops', l: 'Duvar sayısı', t: 'n', min: 1, max: 20, s: 1 },
     { k: 'wallOrder', l: 'Duvar sırası', t: 's', o: { 'inner-outer': 'İç → Dış (yüzey kalitesi)', 'outer-inner': 'Dış → İç (ölçü hassasiyeti)' } },
+    { k: 'alternateLayers', l: 'Bir ters bir düz (deneysel)', t: 's', o: { none: 'Kapalı', dir: 'Duvar yönü katman katman ters', order: 'Yön + sıra (tek katmanda önce dolgu)' }, tip: 'Tek numaralı katmanlarda duvarlar ters yönde basılır. "Yön + sıra" modunda o katmanda önce dolgu basılır, böylece kafa bir önceki katmanın bittiği yerden devam eder. Kazanç küçüktür; dikiş ve dış yüzey kalitesini etkileyebilir.' },
   ]},
   { g: 'Üst / alt kabuk', sec: 'Dayanıklılık', items: [
     { k: 'topLayers', l: 'Üst katman sayısı', t: 'n', min: 0, max: 30, s: 1 },
@@ -324,7 +325,7 @@ export const PROCESS_BASE = {
   seam: 'corner', seamGap: 10, scarfSeam: 'none', scarfLength: 10, scarfStartHeight: 0,
   xyContourCompensation: 0, xyHoleCompensation: 0, elephantFoot: 0.1,
   ironing: 'none', ironingFlow: 10, ironingSpacing: 0.15, ironingInset: 0.2, ironingSpeed: 30,
-  wallLoops: 2, wallOrder: 'inner-outer', gapFill: true, gapFillMin: 0.1, gapFillSpeed: 150,
+  wallLoops: 2, wallOrder: 'inner-outer', alternateLayers: 'none', gapFill: true, gapFillMin: 0.1, gapFillSpeed: 150,
   topLayers: 5, topThickness: 0.8, topPattern: 'monotonic', topAngleMode: 'auto', topAngle: 0, topFlow: 1.0,
   bottomLayers: 3, bottomThickness: 0, bottomPattern: 'monotonic',
   infillDensity: 15, infillPattern: 'grid', helixStep: 15, infillJoin: false, infillEvery: 1, infillAngle: 45, solidAngle: 45, infillOverlap: 15, minSparseArea: 15,
