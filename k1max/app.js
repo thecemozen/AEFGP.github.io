@@ -39,7 +39,7 @@ function toBlob(text, id) {
 }
 
 // ================================================================= durum ve profiller
-const APP_VERSION = '2.11';
+const APP_VERSION = '2.12';
 let state = null;
 state = loadState();
 let viewRadius = 480;
@@ -251,6 +251,7 @@ function settingsChanged(cat) {
   if (cat === 'printer') { syncDeviceFields(); buildBed(); placeAll(); }
   renderQuick();
   invalidate();
+  scheduleAnalysis();
 }
 function invalidate() {
   if (result) $('stats').innerHTML = '<span>Ayarlar değişti — güncel G-code için tekrar <b>Dilimle</b>.</span>';
@@ -606,6 +607,7 @@ function placeAll() {
   partsGroup.visible = $('showModel').checked || !result;
   $('editHint').hidden = !partsGroup.visible;
   updateButtons(fits);
+  scheduleAnalysis();
 }
 function focusModels() {
   const all = new THREE.Box3();
@@ -917,6 +919,84 @@ $('arrange').addEventListener('click', () => {
   objects.forEach(o => { o.x += dx; o.y += dy; });
   changed3d(); focusModels();
 });
+
+// ================================================================= model analizi ve öneriler
+let anaTimer = null;
+function scheduleAnalysis() { clearTimeout(anaTimer); anaTimer = setTimeout(() => { try { analyzeModels(); } catch (e) { $('anaCard').hidden = true; } }, 350); }
+// nesnenin dünya koordinatlarındaki üçgenlerinden ölçüler
+function objMetrics(o, supAngle) {
+  const m = { contact: 0, over: 0, overMaxZ: 0, vert: 0, slope: 0, flat: 0, box: new THREE.Box3(), faces: new Map() };
+  const cosLim = Math.cos(supAngle * Math.PI / 180); // aşağı bakan yüzün yataya açısı < eşik → destek ister
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), n = new THREE.Vector3(), t = new THREE.Vector3();
+  objParts(o).forEach(pt => {
+    const g = pt.mesh.geometry, p = g.attributes.position.array;
+    if (g.boundingBox) m.box.union(g.boundingBox);
+    for (let i = 0; i < p.length; i += 9) {
+      a.set(p[i], p[i + 1], p[i + 2]); b.set(p[i + 3], p[i + 4], p[i + 5]); c.set(p[i + 6], p[i + 7], p[i + 8]);
+      n.subVectors(b, a).cross(t.subVectors(c, a));
+      const area = n.length() / 2; if (area < 1e-9) continue;
+      n.normalize();
+      const zmin = Math.min(a.z, b.z, c.z), az = Math.abs(n.z);
+      if (n.z < -0.985 && zmin < 0.05 && Math.max(a.z, b.z, c.z) < 0.05) m.contact += area;
+      else if (n.z < 0 && -n.z > cosLim && zmin > 0.3) { m.over += area; m.overMaxZ = Math.max(m.overMaxZ, zmin); }
+      if (az < 0.05) m.vert += area; else if (az > 0.995) m.flat += area; else m.slope += area;
+      const key = `${Math.round(n.x * 40)},${Math.round(n.y * 40)},${Math.round(n.z * 40)}`;
+      const e = m.faces.get(key) || { area: 0, nz: 0 }; e.area += area; e.nz += n.z * area; m.faces.set(key, e);
+    }
+  });
+  let best = null; m.faces.forEach(e => { if (!best || e.area > best.area) best = e; });
+  m.bestFace = best ? { area: best.area, nz: best.nz / best.area } : null;
+  return m;
+}
+function analyzeModels() {
+  if (!parts.length) { $('anaCard').hidden = true; return; }
+  const P = state.process.values, used = [...new Set(parts.map(p => p.slot))];
+  const types = used.map(k => ((state.slots[k] || {}).values || {}).filamentType || '').map(x => String(x).toUpperCase());
+  const warpy = types.some(t => /ABS|ASA|PC|PA|NYLON/.test(t));
+  const items = [];
+  let overTot = 0, contactTot = 0, vert = 0, slope = 0;
+  const setP = (k, v) => { state.process.values[k] = v; settingsChanged('process'); if (state.cat === 'process') renderSettings(); };
+  objects.forEach(o => {
+    if (!objParts(o).length) return;
+    const m = objMetrics(o, P.supportAngle || 30);
+    overTot += m.over; contactTot += m.contact; vert += m.vert; slope += m.slope;
+    const sz = m.box.getSize(new THREE.Vector3()), H = sz.z, minXY = Math.max(0.1, Math.min(sz.x, sz.y));
+    const nm = objects.length > 1 ? `“${o.name}”: ` : '';
+    // tabla teması küçük, model uzun → devrilme / kalkma riski
+    if (H > 15 && (m.contact < 80 || H / minXY > 2.5) && !(P.brimWidth > 0))
+      items.push({ k: 'brim', lvl: 'warn', text: `${nm}Tablaya değen alan küçük (${(m.contact / 100).toFixed(1)} cm²) ve model ${H.toFixed(0)} mm yüksek: baskı sırasında kalkabilir ya da devrilebilir. 5 mm kenarlık (brim) önerilir.`, btn: 'Kenarlık ekle', apply: () => setP('brimWidth', 5) });
+    // daha büyük düz bir yüz tablaya bakmıyor → yatır
+    if (m.bestFace && m.bestFace.nz > -0.97 && m.bestFace.area > Math.max(150, m.contact * 2) && m.over > 50)
+      items.push({ k: 'flat' + o.id, lvl: 'tip', text: `${nm}En geniş düz yüzü (${(m.bestFace.area / 100).toFixed(1)} cm²) tablaya yatırılırsa tabla teması artar, destek azalabilir.`, btn: 'Yüzeye yatır', apply: () => { select(o); $('layflat').click(); } });
+  });
+  if (warpy && !(P.brimWidth > 0)) {
+    const big = objects.some(o => { const f = objFootprint(o); return Math.max(f.max.x - f.min.x, f.max.y - f.min.y) > 60; });
+    if (big && !items.some(i => i.k === 'brim'))
+      items.push({ k: 'brim', lvl: 'warn', text: `${types.find(t => /ABS|ASA|PC|PA|NYLON/.test(t))} çekmeye (köşe kalkmasına) yatkın ve model geniş. 5 mm kenarlık önerilir; kapağı kapalı basın, kasa fanını kapalı tutun.`, btn: 'Kenarlık ekle', apply: () => setP('brimWidth', 5) });
+  }
+  // destek
+  if (overTot > 40 && !P.supportEnable)
+    items.push({ k: 'sup', lvl: 'warn', text: `Desteksiz kalacak ${(overTot / 100).toFixed(1)} cm² çıkıntı var (yataya ${P.supportAngle || 30}°'den yatık aşağı bakan yüzeyler). Kısa köprüler destek istemez; uzun çıkıntılar sarkar.`, btn: 'Desteği aç', apply: () => setP('supportEnable', true) });
+  else if (P.supportEnable && overTot < 5)
+    items.push({ k: 'nosup', lvl: 'tip', text: 'Destek açık ama modelde desteğe ihtiyaç duyan çıkıntı bulunmadı. Kapatırsanız baskı süresi ve filament azalır.', btn: 'Desteği kapat', apply: () => setP('supportEnable', false) });
+  // uyarlanabilir katman: dik duvar ağırlıklı modellerde hız kazancı
+  if (!P.adaptiveLayers && !P.spiralVase && vert + slope > 0) {
+    const share = vert / (vert + slope);
+    if (share > 0.6)
+      items.push({ k: 'adapt', lvl: 'tip', text: `Yüzeyin %${Math.round(share * 100)}'i dik duvar: uyarlanabilir katman bu kısımları 0.28 mm basar, eğimli yerlerde inceltir. Benzer modellerde süre %10–30 kısaldı.`, btn: 'Uyarlanabilir katmanı aç', apply: () => setP('adaptiveLayers', true) });
+  }
+  if (!items.length) items.push({ k: 'ok', lvl: 'ok', text: 'Belirgin bir sorun görünmüyor. Ayarlar bu model için uygun.' });
+  $('anaSum').textContent = `Tabla teması ${(contactTot / 100).toFixed(1)} cm² · desteğe ihtiyaç duyan çıkıntı ${(overTot / 100).toFixed(1)} cm²`;
+  const list = $('anaList'); list.innerHTML = '';
+  items.forEach(it => {
+    const row = document.createElement('div'); row.className = 'it ' + it.lvl;
+    row.innerHTML = `<span class="ic">${it.lvl === 'warn' ? '⚠' : it.lvl === 'tip' ? '💡' : '✓'}</span><span class="tx"></span>`;
+    row.querySelector('.tx').textContent = it.text;
+    if (it.apply) { const b = document.createElement('button'); b.className = 'btn small'; b.textContent = it.btn; b.dataset.ana = it.k; b.onclick = () => { it.apply(); toast(it.btn + ': uygulandı.'); }; row.appendChild(b); }
+    list.appendChild(row);
+  });
+  $('anaCard').hidden = false;
+}
 
 // ================================================================= dosya yükleme
 const stlLoader = new STLLoader();
