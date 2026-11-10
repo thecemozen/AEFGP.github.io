@@ -39,7 +39,7 @@ function toBlob(text, id) {
 }
 
 // ================================================================= durum ve profiller
-const APP_VERSION = '2.9';
+const APP_VERSION = '2.10';
 let state = null;
 state = loadState();
 let viewRadius = 480;
@@ -1664,7 +1664,7 @@ async function connect(silent) {
       dev.connected = true; dev.base = base;
       if (port !== state.printer.values.hostPort) { state.printer.values.hostPort = port; $('devPort').value = port; saveState(); }
       $('devHint').innerHTML = `Bağlandı: <b>${escapeHtml(ip)}:${port}</b> · Klipper: ${escapeHtml(info.klippy_state || '?')}`;
-      $('devStatusCard').hidden = false;
+      $('devStatusCard').hidden = false; $('camCard').hidden = false;
       pollStatus(); startPolling();
       learnFromHistory();
       updateButtons();
@@ -1685,7 +1685,7 @@ async function connect(silent) {
   updateButtons();
   return false;
 }
-function disconnect() { dev.connected = false; stopPolling(); $('devStatusCard').hidden = true; updateButtons(); }
+function disconnect() { dev.connected = false; stopPolling(); camStop(); $('devStatusCard').hidden = true; $('camCard').hidden = true; updateButtons(); }
 $('devConnect').addEventListener('click', () => connect(false));
 
 const STATE_TR = { standby: 'Hazır', printing: 'Basıyor', paused: 'Duraklatıldı', complete: 'Tamamlandı', cancelled: 'İptal edildi', error: 'Hata' };
@@ -1701,7 +1701,12 @@ async function pollStatus() {
     const prog = st.display_status ? st.display_status.progress : 0;
     $('stProg').textContent = Math.round(prog * 100) + '%';
     $('stBar').style.width = (prog * 100).toFixed(1) + '%';
-    $('stFile').textContent = st.print_stats.filename ? 'Dosya: ' + st.print_stats.filename : '';
+    const ps = st.print_stats, info = ps.info || {}, active = dev.state === 'printing' || dev.state === 'paused';
+    const left = active && prog > 0.02 && ps.print_duration > 60 ? ps.print_duration / prog - ps.print_duration : 0;
+    $('stFile').textContent = (ps.filename ? 'Dosya: ' + ps.filename : '') +
+      (active && info.total_layer ? ` · Katman ${info.current_layer || 0}/${info.total_layer}` : '') +
+      (left ? ` · Kalan ~${fmtTime(left)}` : '') + (dev.state === 'complete' && ps.print_duration ? ` · Süre ${fmtTime(ps.print_duration)}` : '');
+    printEvent(dev.state, ps);
     $('devPause').disabled = dev.state !== 'printing';
     $('devResume').disabled = dev.state !== 'paused';
     $('devCancel').disabled = !(dev.state === 'printing' || dev.state === 'paused');
@@ -1719,6 +1724,103 @@ document.addEventListener('visibilitychange', () => {
 });
 function startPolling() { stopPolling(); dev.timer = setInterval(() => { if (!document.hidden && (document.body.dataset.tab === 'device' || window.innerWidth > 820)) pollStatus(); }, 3000); }
 function stopPolling() { if (dev.timer) clearInterval(dev.timer); dev.timer = null; }
+// ---------------- baskı bildirimleri
+const NOTIFY_KEY = 'k1max-notify';
+const notifyOn = () => store.get(NOTIFY_KEY) !== '0';
+function printEvent(stateNow, ps) {
+  const prev = dev.lastState; dev.lastState = stateNow;
+  if (!notifyOn()) return;
+  const active = stateNow === 'printing' || stateNow === 'paused';
+  // Android: uygulama kapalıyken de yazıcıyı izleyen yerel takipçi
+  if (bridge && bridge.watchPrint) { if (active && prev !== stateNow) bridge.watchPrint(dev.base, true); return; }
+  // tarayıcı: sayfa açıkken durum değişince bildirim
+  if (!(prev === 'printing' || prev === 'paused') || active || !prev) return;
+  const name = (ps.filename || '').replace(/\.gcode$/i, '');
+  const msg = { complete: ['Baskı tamamlandı ✓', name + ' · ' + fmtTime(ps.print_duration || 0)], cancelled: ['Baskı iptal edildi', name], error: ['Baskı hatası!', name + ' ' + (ps.message || '')] }[stateNow];
+  if (!msg) return;
+  toast(msg[0] + ' — ' + msg[1], stateNow === 'error');
+  try { if (window.Notification && Notification.permission === 'granted') new Notification(msg[0], { body: msg[1], icon: 'icons/icon-192.png' }); } catch (e) { /* desteklenmiyor */ }
+}
+function renderNotify() {
+  $('notifyOn').checked = notifyOn();
+  $('notifyHint').textContent = bridge
+    ? (bridge.watchPrint ? 'Baskı başlayınca telefon yazıcıyı dakikada bir yoklar; uygulama kapalı olsa da ilerleme ve sonuç bildirimi gelir (telefon uykudayken aralık uzayabilir).' : 'Bu uygulama sürümü arka plan bildirimini desteklemiyor; uygulamayı güncelleyin.')
+    : 'Tarayıcıda bildirim yalnızca bu sayfa açıkken gelir. Uygulama kapalıyken bildirim için Android uygulamasını kullanın.';
+}
+$('notifyOn').addEventListener('change', async () => {
+  const on = $('notifyOn').checked;
+  store.set(NOTIFY_KEY, on ? '1' : '0');
+  if (!on && bridge && bridge.watchPrint) bridge.watchPrint('', false);
+  if (on && bridge && bridge.watchPrint && (dev.state === 'printing' || dev.state === 'paused')) bridge.watchPrint(dev.base, true);
+  if (on && !bridge && window.Notification && Notification.permission === 'default') { try { await Notification.requestPermission(); } catch (e) { /* yok */ } }
+});
+renderNotify();
+// bildirime dokununca Cihaz sekmesini aç
+window.k1OpenTab = (t) => { setTab(t); if (state.printer.values.hostIp && !dev.connected) connect(true); };
+
+// ---------------- kamera
+const cam = { on: false, url: '', snap: '', timer: null };
+function camStop() {
+  cam.on = false; if (cam.timer) clearInterval(cam.timer); cam.timer = null;
+  const img = $('camImg'); img.onload = img.onerror = null; img.removeAttribute('src');
+  $('camBox').hidden = true; $('camBox').classList.remove('full'); $('camFull').hidden = true; $('camToggle').textContent = 'Kamerayı aç';
+}
+// Moonraker'ın kamera listesinden ve K1'in bilinen adreslerinden aday URL'ler
+async function camCandidates() {
+  const host = state.printer.values.hostIp, list = [];
+  const abs = (u, port) => /^https?:\/\//i.test(u) ? u : `http://${host}${port ? ':' + port : ''}${u.startsWith('/') ? '' : '/'}${u}`;
+  try {
+    const r = await http('GET', dev.base + '/server/webcams/list', { timeout: 4000 });
+    const cams = (((json(r) || {}).result || {}).webcams || []).filter(c => c.enabled !== false);
+    cams.forEach(c => {
+      const ports = /^https?:/i.test(c.stream_url || '') ? [0] : [4408, 0, 4409];
+      ports.forEach(pt => {
+        if (c.stream_url) list.push({ kind: 'stream', url: abs(c.stream_url, pt), name: c.name });
+        if (c.snapshot_url) list.push({ kind: 'snap', url: abs(c.snapshot_url, pt), name: c.name });
+      });
+    });
+  } catch (e) { /* liste yok */ }
+  list.push({ kind: 'stream', url: `http://${host}:8080/?action=stream` }, { kind: 'snap', url: `http://${host}:8080/?action=snapshot` },
+    { kind: 'stream', url: `http://${host}:4408/webcam/?action=stream` }, { kind: 'snap', url: `http://${host}:4408/webcam/?action=snapshot` });
+  return list.filter((c, i, a) => a.findIndex(d => d.url === c.url) === i);
+}
+function tryImg(url, ms) {
+  return new Promise(res => {
+    const im = new Image(); let done = false;
+    const fin = (ok) => { if (done) return; done = true; im.onload = im.onerror = null; if (!ok) im.src = ''; res(ok ? im : null); };
+    im.onload = () => fin(im.naturalWidth > 0); im.onerror = () => fin(false);
+    setTimeout(() => fin(false), ms);
+    im.src = url + (url.includes('?') ? '&' : '?') + '_t=' + Date.now();
+  });
+}
+$('camToggle').addEventListener('click', async () => {
+  if (cam.on) { camStop(); return; }
+  cam.on = true; $('camToggle').textContent = 'Kamerayı kapat'; $('camHint').textContent = 'Kamera aranıyor…';
+  const cands = await camCandidates();
+  // önce akış (MJPEG), olmazsa saniyede bir anlık görüntü
+  for (const kind of ['stream', 'snap']) {
+    for (const c of cands.filter(x => x.kind === kind)) {
+      if (!cam.on) return;
+      const ok = await tryImg(c.url, kind === 'stream' ? 5000 : 4000);
+      if (ok) { ok.src = ''; return camShow(c); }
+    }
+  }
+  camStop();
+  $('camHint').textContent = 'Kamera bulunamadı. Fluidd → Ayarlar → Kameralar bölümünde bir kamera tanımlı olduğundan emin olun.' + (location.protocol === 'https:' && !bridge ? ' (HTTPS sayfası yerel http kamerasını engelliyor olabilir; Android uygulamasını ya da çevrimdışı HTML dosyasını deneyin.)' : '');
+});
+function camShow(c) {
+  const img = $('camImg');
+  $('camBox').hidden = false; $('camFull').hidden = false;
+  $('camHint').textContent = (c.name ? c.name + ' · ' : '') + (c.kind === 'stream' ? 'canlı akış' : 'anlık görüntü (saniyede bir)');
+  const bust = () => c.url + (c.url.includes('?') ? '&' : '?') + '_t=' + Date.now();
+  img.onerror = () => { if (cam.on && c.kind === 'stream') setTimeout(() => { if (cam.on) img.src = bust(); }, 2000); };
+  img.src = bust();
+  if (c.kind === 'snap') cam.timer = setInterval(() => { if (!document.hidden) img.src = bust(); }, 1000);
+}
+$('camFull').addEventListener('click', () => $('camBox').classList.toggle('full'));
+$('camBox').addEventListener('click', () => $('camBox').classList.remove('full'));
+document.addEventListener('visibilitychange', () => { if (document.hidden && cam.on) camStop(); });
+
 async function printerCmd(path, okMsg) {
   try {
     const r = await http('POST', dev.base + path, { timeout: 6000 });
@@ -1882,6 +1984,7 @@ function setTab(tab) {
   document.querySelectorAll('.tabs button, .ptabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
   if (tab === 'view') requestAnimationFrame(() => { resize(); if (!parts.length) setView('iso'); });
   if (tab === 'device' && dev.connected) pollStatus();
+  if (tab !== 'device' && !isDesktop() && cam.on) camStop();
   if (tab === 'device' && !dev.connected && state.printer.values.hostIp) connect(true);
 }
 document.querySelectorAll('.tabs button, .ptabs button').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
@@ -1948,6 +2051,7 @@ function promptDlg(t, label, def) {
 }
 
 function fmtTime(s) {
+  s = Math.round(s);
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
   return h ? `${h} sa ${m} dk` : `${m} dk ${s % 60} sn`;
 }

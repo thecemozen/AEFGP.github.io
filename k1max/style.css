@@ -200,3 +200,7 @@ body[data-tab="device"] .panel [data-sec="device"] { display: block; }
   .busy { min-width: 0; width: calc(100% - 32px); }
   .status { grid-template-columns: repeat(2, 1fr); }
 }
+/* kamera */
+.cam { position: relative; background: #000; border-radius: 8px; overflow: hidden; margin-bottom: 6px; aspect-ratio: 4 / 3; }
+.cam img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.cam.full { position: fixed; inset: 0; z-index: 60; border-radius: 0; aspect-ratio: auto; }

@@ -153,6 +153,8 @@ public class MainActivity extends Activity {
     /** Dosya yöneticisinden gelen STL'i sayfaya aktarır. */
     private void handleIntent(Intent intent) {
         if (intent == null) return;
+        String tab = intent.getStringExtra("k1tab");
+        if (tab != null) { web.evaluateJavascript("window.k1OpenTab&&k1OpenTab(" + jsString(tab) + ")", null); return; }
         Uri uri = null;
         if (Intent.ACTION_VIEW.equals(intent.getAction())) uri = intent.getData();
         else if (Intent.ACTION_SEND.equals(intent.getAction())) uri = intent.getParcelableExtra(Intent.EXTRA_STREAM);
@@ -217,6 +219,14 @@ public class MainActivity extends Activity {
         @JavascriptInterface public boolean blobAppend(String id, String chunk) {
             try (FileOutputStream os = new FileOutputStream(blobFile(id), true)) { os.write(chunk.getBytes(StandardCharsets.UTF_8)); return true; }
             catch (Exception e) { return false; }
+        }
+        /** Baskı takibini başlatır/durdurur (uygulama kapalıyken bildirim). base: http://ip:port */
+        @JavascriptInterface public void watchPrint(String base, boolean on) {
+            if (on && base != null && base.length() > 0) {
+                if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != 0)
+                    requestPermissions(new String[]{ "android.permission.POST_NOTIFICATIONS" }, 3);
+                PrintWatch.start(MainActivity.this, base);
+            } else PrintWatch.stop(MainActivity.this);
         }
         /** İkili veri (3MF proje) için: base64 parçasını çözüp geçici dosyaya ekler. */
         @JavascriptInterface public boolean blobAppend64(String id, String b64) {
