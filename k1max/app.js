@@ -507,14 +507,15 @@ function partMaterial(slot) {
 }
 function recolorParts() { parts.forEach(p => { if (p.mesh) p.mesh.material.color.set(state.slots[p.slot].color); }); }
 
-function addParts(list, replace) {
+function addParts(list, replace, keepCalib) {
+  if (!keepCalib) setCalib(null);
   if (replace) { parts.forEach(p => { partsGroup.remove(p.mesh); p.mesh.geometry.dispose(); }); parts = []; $('scale').value = 100; }
   list.forEach(p => {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(p.positions, 3));
     const mesh = new THREE.Mesh(new THREE.BufferGeometry(), partMaterial(p.slot || 0));
     partsGroup.add(mesh);
-    parts.push({ name: p.name, geom: g, slot: p.slot || 0, mesh });
+    parts.push({ name: p.name, geom: g, slot: p.slot || 0, mesh, flowMul: p.flowMul || 1 });
   });
   placeAll();
   clearPreview();
@@ -729,6 +730,103 @@ $('demo').addEventListener('click', () => { addParts(demoParts(false), true); se
 $('demo2').addEventListener('click', () => $('demo').click());
 $('demoMulti').addEventListener('click', () => { addParts(demoParts(true), true); setView('iso'); setTab('view'); toast('İki renkli örnek: taban Yuva 1, yıldız Yuva 2.'); });
 
+// ================================================================= kalibrasyon testleri
+let calibMode = null;
+const geoPos = (g) => new Float32Array((g.index ? g.toNonIndexed() : g).attributes.position.array);
+const boxAt = (x, y, z, w, d, h) => { const g = new THREE.BoxGeometry(w, d, h); g.translate(x + w / 2, y + d / 2, z + h / 2); return geoPos(g); };
+const cylAt = (x, y, z, r, h, seg = 64) => { const g = new THREE.CylinderGeometry(r, r, h, seg); g.rotateX(Math.PI / 2); g.translate(x, y, z + h / 2); return geoPos(g); };
+const merge = (arrs) => { const o = new Float32Array(arrs.reduce((a, b) => a + b.length, 0)); let k = 0; arrs.forEach(a => { o.set(a, k); k += a.length; }); return o; };
+const FLOW_STEPS = [-8, -6, -4, -2, 0, 2, 4, 6, 8];
+const CALIBS = {
+  flow: {
+    name: 'Akış oranı', unit: 'kare no (1–9)', min: 1, max: 9, step: 1,
+    parts() {
+      const out = [];
+      FLOW_STEPS.forEach((pc, i) => {
+        const cx = (i % 3) * 26, cy = Math.floor(i / 3) * 26;
+        out.push({ name: `Akış ${pc >= 0 ? '+' : ''}${pc}% (kare ${i + 1})`, positions: boxAt(cx, cy, 0, 22, 22, 3), slot: 0, flowMul: 1 + pc / 100 });
+      });
+      out.push({ name: 'İşaret (kare 1)', positions: cylAt(2.5, 2.5, 3, 1.5, 1.2, 24), slot: 0, flowMul: 1 + FLOW_STEPS[0] / 100 });
+      return out;
+    },
+    S: { topLayers: 5, bottomLayers: 3, infillDensity: 15, topPattern: 'monotonic', ironing: 'none', topAngleMode: 'fixed', topAngle: 45 },
+    help: 'Dokuz kare farklı akışla basılır. Kare 1 ön-sol köşedekidir (üstünde küçük bir pim var); numaralar soldan sağa, önden arkaya artar: 1–3 ön sıra, 7–9 arka sıra. Akışlar: ' +
+      FLOW_STEPS.map((p, i) => `${i + 1}: ${p >= 0 ? '+' : ''}${p}%`).join(', ') + '. Baskıdan sonra üst yüzeyi en pürüzsüz, çizgileri ne oluklu ne kabarık olan kareyi seçin.',
+    apply(v, F) { const pc = FLOW_STEPS[Math.round(v) - 1] || 0; F.flowRatio = Math.round(F.flowRatio * (1 + pc / 100) * 1000) / 1000; return `Akış oranı ${F.flowRatio}`; },
+  },
+  pa: {
+    name: 'Pressure advance', unit: 'yükseklik (mm)', min: 0, max: 30, step: 0.5,
+    parts: () => [{ name: 'PA kulesi', positions: boxAt(0, 0, 0, 40, 40, 30), slot: 0 }],
+    S: { infillDensity: 0, topLayers: 0, bottomLayers: 3, wallLoops: 2, outerWallSpeed: 120, innerWallSpeed: 120, accelOuterWall: 1000, accelInnerWall: 1000, squareCornerVelocity: 1, seam: 'rear', scarfSeam: 'none' },
+    calib: { type: 'pa', start: 0, perMm: 0.002 },
+    help: 'Kare kule basılır; pressure advance her mm\'de 0,002 artar (0 → 0,06). Köşeleri inceleyin: altta köşeler şişkin, üstte köşelerden sonra boşluk/incelme olur. Köşelerin en keskin ve düzgün olduğu yüksekliği kumpasla ölçün (mm).',
+    apply(v, F) { F.pressureAdvance = Math.round(v * 0.002 * 1000) / 1000; return `Pressure advance ${F.pressureAdvance}`; },
+  },
+  temp: {
+    name: 'Sıcaklık kulesi', unit: 'blok no (1 = en alt)', min: 1, max: 6, step: 1,
+    parts() {
+      const prof = new THREE.Shape([[0, 0], [20, 0], [28, 8], [0, 8]].map(p => new THREE.Vector2(...p)));
+      const out = [];
+      for (let b = 0; b < 6; b++) { const g = new THREE.ExtrudeGeometry(prof, { depth: 12, bevelEnabled: false }); g.rotateX(Math.PI / 2); g.translate(0, 12, b * 8); out.push(geoPos(g)); }
+      return [{ name: 'Sıcaklık kulesi', positions: merge(out), slot: 0 }];
+    },
+    S: { infillDensity: 15, wallLoops: 2 },
+    calib(F) { return { type: 'temp', start: Math.min(300, F.nozzleTemp + 15), step: 5, blockH: 8 }; },
+    F(F) { const t = Math.min(300, F.nozzleTemp + 15); return { nozzleTemp: t, nozzleTempFirst: t }; },
+    help: 'Altı blok basılır; en alttaki blok profildeki sıcaklığın 15°C üstünde başlar, her blokta 5°C düşer. Her bloğun sağında 45° çıkıntı vardır. Çıkıntısı sarkmayan, yüzeyi parlak ama ipliksiz, katmanları sağlam bloğu seçin (1 = en alt).',
+    apply(v, F) { const t = Math.min(300, F.nozzleTemp + 15) - (Math.round(v) - 1) * 5; F.nozzleTemp = t; F.nozzleTempFirst = Math.max(t, F.nozzleTempFirst); return `Nozul sıcaklığı ${t}°C`; },
+  },
+  retract: {
+    name: 'Geri çekme', unit: 'yükseklik (mm)', min: 0, max: 30, step: 0.5,
+    parts: () => [{ name: 'Geri çekme kuleleri', positions: merge([cylAt(0, 0, 0, 4, 30), cylAt(40, 0, 0, 4, 30)]), slot: 0 }],
+    S: { wipe: false, infillDensity: 15 },
+    calib: { type: 'retract', start: 0.2, step: 0.2, stepH: 3 },
+    help: 'İki kule basılır; geri çekme her 3 mm\'de 0,2 mm artar (alt 0,2 mm → üst 2,0 mm). Kuleler arasında ip çekmenin bittiği ilk yüksekliği ölçün (mm). Çok yüksek geri çekme tıkanmaya yol açabilir; gereğinden fazlasını seçmeyin.',
+    apply(v, F) { F.retractLength = Math.round((0.2 + Math.floor(v / 3) * 0.2) * 100) / 100; return `Geri çekme ${F.retractLength} mm`; },
+  },
+  vol: {
+    name: 'Maks. akış', unit: 'yükseklik (mm)', min: 0, max: 30, step: 0.5,
+    parts: () => [{ name: 'Maks. akış vazosu', positions: cylAt(0, 0, 0, 15, 30, 96), slot: 0 }],
+    S: { spiralVase: true, wallLoops: 1, topLayers: 0, bottomLayers: 2, infillDensity: 0, layerHeight: 0.2, firstLayerHeight: 0.2, outerWallLineWidth: 0.45, scarfSeam: 'none' },
+    F: () => ({ maxVolumetric: 100 }),
+    calib: { type: 'vol', start: 5, perMm: 1 },
+    help: 'Vazo modunda tek duvarlı silindir basılır; akış her mm\'de 1 mm³/s artar (5 → 35 mm³/s). Yüzeyde ilk pürüz, parlaklık kaybı ya da eksik ekstrüzyon görülen yüksekliği ölçün (mm). Güvenli değer bunun %90\'ı olarak kaydedilir.',
+    apply(v, F) { F.maxVolumetric = Math.round((5 + v) * 0.9 * 2) / 2; return `Maks. hacimsel akış ${F.maxVolumetric} mm³/s`; },
+  },
+  cfs: {
+    name: 'CFS testi', parts: () => [
+      { name: 'Alt (yuva 1)', positions: boxAt(0, 0, 0, 20, 20, 6), slot: 0 },
+      { name: 'Üst (yuva 2)', positions: boxAt(0, 0, 6, 20, 20, 6), slot: 1 },
+    ],
+    help: 'Alt yarısı yuva 1, üst yarısı yuva 2 ile basılan küçük bir küp. Yazıcının renk değiştirmeyi (kesme, boşaltma, yükleme) doğru yaptığını ve kulede temizlemenin yeterli olduğunu kontrol edin. Sorun olursa Creality Print\'teki K1 Max (CFS) profilinin filament değiştirme G-code\'unu Ayarlar → Yazıcı → CFS bölümüne yapıştırın.',
+  },
+};
+function setCalib(key) {
+  if (!key) { calibMode = null; $('calibResult').hidden = true; $('calibHint').textContent = "Testler yuva 1'deki filamentle, profilinizi değiştirmeden basılır. Sonucu girince değer filament profiline yazılır."; return; }
+  const C = CALIBS[key], F = state.slots[0].values;
+  calibMode = { key, S: C.S, F: C.F, calib: typeof C.calib === 'function' ? C.calib(F) : C.calib };
+  $('calibResult').hidden = !C.apply;
+  $('calibHint').textContent = `${C.name} testi yüklü. Dilimleyip basın, sonra "Sonucu gir"e dokunun.`;
+}
+document.querySelectorAll('[data-calib]').forEach(b => b.addEventListener('click', () => {
+  const key = b.dataset.calib, C = CALIBS[key];
+  addParts(C.parts(), true, true);
+  setCalib(key);
+  setView('iso');
+  dialog(C.name + ' testi', `<p>${escapeHtml(C.help)}</p>`, [[null, 'Tamam', 'primary']]);
+}));
+$('calibResult').addEventListener('click', async () => {
+  if (!calibMode) return;
+  const C = CALIBS[calibMode.key];
+  const v = await dialog(C.name + ' sonucu', `<label class="hint">${escapeHtml(C.unit)}</label><input type="number" id="calibVal" min="${C.min}" max="${C.max}" step="${C.step}">`,
+    [[null, 'Vazgeç'], [() => { const x = parseFloat($('calibVal').value); return isNaN(x) ? null : Math.min(C.max, Math.max(C.min, x)); }, 'Kaydet', 'primary']]);
+  if (v === null || v === undefined) return;
+  const sl = state.slots[0];
+  const msg = C.apply(v, sl.values);
+  saveState(); renderQuick(); if (state.cat === 'filament') renderSettings();
+  toast(`${msg} → yuva 1 (${sl.name}) profiline yazıldı. Kalıcı olması için Ayarlar → Filament'ten "Farklı kaydet" ile kaydedin.`);
+});
+
 // Android: dosya yöneticisinden "Birlikte aç"
 window.k1LoadBase64 = (name, b64) => {
   const bin = atob(b64); const u8 = new Uint8Array(bin.length);
@@ -749,8 +847,14 @@ const PV = 11;
 function buildJob() {
   const S = Object.assign({}, state.printer.values, state.process.values);
   const fils = state.slots.map(sl => Object.assign({}, sl.values, { color: sl.color, name: sl.name }));
-  const jobParts = parts.map(p => ({ name: p.name, slot: p.slot, positions: new Float32Array(p.mesh.geometry.attributes.position.array) }));
-  return { parts: jobParts, S, fils };
+  const jobParts = parts.map(p => ({ name: p.name, slot: p.slot, flowMul: p.flowMul || 1, positions: new Float32Array(p.mesh.geometry.attributes.position.array) }));
+  const job = { parts: jobParts, S, fils };
+  if (calibMode) {
+    Object.assign(S, calibMode.S || {});
+    if (calibMode.F) Object.assign(fils[0], calibMode.F(fils[0]));
+    job.calib = calibMode.calib || null;
+  }
+  return job;
 }
 
 function slice() {

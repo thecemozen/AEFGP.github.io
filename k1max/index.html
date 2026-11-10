@@ -73,6 +73,20 @@
       </section>
 
       <section class="card">
+        <h2>Kalibrasyon</h2>
+        <div class="btn-row" id="calibBtns">
+          <button class="btn small" data-calib="flow">Akış oranı</button>
+          <button class="btn small" data-calib="pa">Pressure advance</button>
+          <button class="btn small" data-calib="temp">Sıcaklık kulesi</button>
+          <button class="btn small" data-calib="retract">Geri çekme</button>
+          <button class="btn small" data-calib="vol">Maks. akış</button>
+          <button class="btn small" data-calib="cfs">CFS testi</button>
+        </div>
+        <p class="hint" id="calibHint">Testler yuva 1'deki filamentle, profilinizi değiştirmeden basılır. Sonucu girince değer filament profiline yazılır.</p>
+        <div class="btn-row"><button class="btn small primary" id="calibResult" hidden>Sonucu gir</button></div>
+      </section>
+
+      <section class="card">
         <h2>Dönüştür</h2>
         <label class="row"><span>Ölçek</span><span class="inp"><input id="scale" type="number" value="100" min="1" max="2000" step="1"><em>%</em></span></label>
         <div class="btn-row">
