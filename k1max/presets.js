@@ -45,6 +45,12 @@ export const PRINTER_SCHEMA = [
     { k: 'zHop', l: 'Z kaldırma', u: 'mm', t: 'n', min: 0, max: 3, s: 0.05 },
     { k: 'retractMinTravel', l: 'Min. hareket mesafesi', u: 'mm', t: 'n', min: 0, max: 20, s: 0.1, tip: 'Bundan kısa boş hareketlerde geri çekme yapılmaz.' },
     { k: 'retractOnLayerChange', l: 'Katman değişiminde geri çek', t: 'b' },
+    { k: 'avoidCrossingWalls', l: 'Duvarları geçmeden dolaş', t: 'b', tip: 'Boş hareketler parçanın içinden dolaşır; dış duvarın üzerinden geçip iz bırakmaz.' },
+    { k: 'retractOnlyCrossing', l: 'Yalnızca parçadan çıkarken geri çek', t: 'b', tip: 'Hareket parçanın içinde kalıyorsa geri çekme yapılmaz: daha kısa süre, yüzeyde daha az iz.' },
+    { k: 'combMaxDetour', l: 'En fazla dolambaç', u: '×', t: 'n', min: 1, max: 5, s: 0.1, tip: 'İçeriden yol düz yolun bu katından uzunsa düz gidilir ve geri çekilir.', adv: true },
+    { k: 'wipe', l: 'Geri çekerken sil', t: 'b', tip: 'Geri çekme sırasında nozul son çizginin üzerinde geri gider; uçtaki damlayı siler, ip çekmeyi azaltır.' },
+    { k: 'wipeDistance', l: 'Silme mesafesi', u: 'mm', t: 'n', min: 0, max: 5, s: 0.1, adv: true },
+    { k: 'wipeRetractPart', l: 'Silme sırasında geri çekme', u: '%', t: 'n', min: 0, max: 100, s: 5, adv: true },
   ]},
   { g: 'CFS / renk değişimi', items: [
     { k: 'toolChangeLift', l: 'Değişimde Z kaldırma', u: 'mm', t: 'n', min: 0, max: 10, s: 0.1, tip: '{z_lift} değişkeni = mevcut Z + bu değer.' },
@@ -72,7 +78,7 @@ export const PRINTER_SCHEMA = [
 export const PRINTER_BASE = {
   bedX: 300, bedY: 300, bedZ: 300, nozzleDiameter: 0.4,
   machineMaxAccel: 20000, machineMaxSpeed: 800, squareCornerVelocity: 5, accelToDecel: 50, zSpeed: 15,
-  retractLength: 0.8, retractSpeed: 40, deretractSpeed: 40, zHop: 0.2, retractMinTravel: 1.5, retractOnLayerChange: true,
+  retractLength: 0.8, retractSpeed: 40, deretractSpeed: 40, zHop: 0.2, retractMinTravel: 1.5, retractOnLayerChange: true, avoidCrossingWalls: true, retractOnlyCrossing: true, combMaxDetour: 2, wipe: true, wipeDistance: 1.5, wipeRetractPart: 70,
   toolChangeLift: 2, toolChangeTime: 45, changeFilamentGcode: CHANGE_GCODE,
   startGcode: START_GCODE, endGcode: END_GCODE, layerChangeGcode: '',
   labelObjects: false, thumbnail: true, thumbnailSize: 300,

@@ -442,6 +442,90 @@
     return joined;
   }
 
+  // ---------------------------------------------------------------- duvarları geçmeden dolaşma (combing)
+  // Bir katmanın parça içi bölgesini adalara ayırır; her ada için kenar listesi ve yönlendirme düğümleri tutar.
+  function combContext(region, nodeRegion) {
+    var isl = islandsOf(region).map(function (paths) {
+      var polys = paths.map(function (p) { return p.map(function (q) { return [q.X / SCALE, q.Y / SCALE]; }); });
+      var b = bboxOf(paths);
+      return { polys: polys, minX: b.minX / SCALE, minY: b.minY / SCALE, maxX: b.maxX / SCALE, maxY: b.maxY / SCALE, nodes: null };
+    });
+    var nodePaths = CL.Clipper.CleanPolygons(nodeRegion, 0.15 * SCALE);
+    return { islands: isl, nodePaths: nodePaths };
+  }
+  function pip(polys, x, y) { // çift-tek kuralı
+    var inside = false;
+    for (var k = 0; k < polys.length; k++) {
+      var p = polys[k];
+      for (var i = 0, j = p.length - 1; i < p.length; j = i++) {
+        if (((p[i][1] > y) !== (p[j][1] > y)) && (x < (p[j][0] - p[i][0]) * (y - p[i][1]) / (p[j][1] - p[i][1]) + p[i][0])) inside = !inside;
+      }
+    }
+    return inside;
+  }
+  function segCross(ax, ay, bx, by, polys) {
+    for (var k = 0; k < polys.length; k++) {
+      var p = polys[k];
+      for (var i = 0, j = p.length - 1; i < p.length; j = i++) {
+        var cx = p[j][0], cy = p[j][1], dx = p[i][0], dy = p[i][1];
+        var d1 = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax), d2 = (bx - ax) * (dy - ay) - (by - ay) * (dx - ax);
+        var d3 = (dx - cx) * (ay - cy) - (dy - cy) * (ax - cx), d4 = (dx - cx) * (by - cy) - (dy - cy) * (bx - cx);
+        if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) return true;
+      }
+    }
+    return false;
+  }
+  function segInside(isl, ax, ay, bx, by) { return !segCross(ax, ay, bx, by, isl.polys) && pip(isl.polys, (ax + bx) / 2, (ay + by) / 2); }
+  function findIsland(ctx, x, y) {
+    for (var i = 0; i < ctx.islands.length; i++) {
+      var I = ctx.islands[i];
+      if (x < I.minX || x > I.maxX || y < I.minY || y > I.maxY) continue;
+      if (pip(I.polys, x, y)) return I;
+    }
+    return null;
+  }
+  // A'dan B'ye ada içinde kalan en kısa yol (görünürlük grafiği + Dijkstra). Bulunamazsa null.
+  function combRoute(ctx, ax, ay, bx, by, maxNodes) {
+    var I = findIsland(ctx, ax, ay);
+    if (!I || I !== findIsland(ctx, bx, by)) return null;
+    if (segInside(I, ax, ay, bx, by)) return [[bx, by]];
+    if (!I.nodes) {
+      I.nodes = [];
+      ctx.nodePaths.forEach(function (p) {
+        p.forEach(function (q) { var x = q.X / SCALE, y = q.Y / SCALE; if (x >= I.minX && x <= I.maxX && y >= I.minY && y <= I.maxY && pip(I.polys, x, y)) I.nodes.push([x, y]); });
+      });
+      if (I.nodes.length > maxNodes) I.nodes = I.nodes.filter(function (_, i) { return i % Math.ceil(I.nodes.length / maxNodes) === 0; });
+      I.vis = {};
+    }
+    var N = I.nodes, n = N.length + 2;
+    var P = function (i) { return i < N.length ? N[i] : (i === N.length ? [ax, ay] : [bx, by]); };
+    var vis = function (i, j) {
+      if (i < N.length && j < N.length) { var key = i < j ? i * 100000 + j : j * 100000 + i; if (I.vis[key] === undefined) { var a = P(i), b = P(j); I.vis[key] = segInside(I, a[0], a[1], b[0], b[1]); } return I.vis[key]; }
+      var a2 = P(i), b2 = P(j); return segInside(I, a2[0], a2[1], b2[0], b2[1]);
+    };
+    var dist = new Float64Array(n).fill(Infinity), prev = new Int32Array(n).fill(-1), done = new Uint8Array(n);
+    var src = N.length, dst = N.length + 1;
+    dist[src] = 0;
+    for (var it = 0; it < n; it++) {
+      var u = -1, best = Infinity;
+      for (var k = 0; k < n; k++) if (!done[k] && dist[k] < best) { best = dist[k]; u = k; }
+      if (u < 0 || u === dst) break;
+      done[u] = 1;
+      var pu = P(u);
+      for (var v = 0; v < n; v++) {
+        if (done[v] || v === src) continue;
+        var pv = P(v), w = Math.hypot(pv[0] - pu[0], pv[1] - pu[1]);
+        if (dist[u] + w >= dist[v]) continue;
+        if (!vis(u, v)) continue;
+        dist[v] = dist[u] + w; prev[v] = u;
+      }
+    }
+    if (prev[dst] < 0) return null;
+    var path = [], c = dst;
+    while (c !== src && c >= 0) { path.unshift(P(c)); c = prev[c]; }
+    return path;
+  }
+
   // ---------------------------------------------------------------- yol sıralama
   function orderLines(lines, start) {
     var res = [];
@@ -712,7 +796,8 @@
     var extruder = -1;
     var retracted = false;
     var curF = 0, curAccel = 0, fanState = {};
-    var stats = { time: 0, e: [0, 0, 0, 0], toolChanges: 0, byType: {} };
+    var stats = { time: 0, e: [0, 0, 0, 0], toolChanges: 0, byType: {}, retracts: 0, combed: 0 };
+    var lastPath = null, comb = null;
     var nL = layers.length;
     var bedCx = S.bedX / 2;
     var speedFactor = 1;
@@ -749,9 +834,31 @@
     function retract() {
       var L = retractLen();
       if (retracted || L <= 0) return;
-      out.push('G1 E-' + f3(L) + ' F' + Math.round(retractSpd() * 60));
-      stats.time += L / retractSpd();
+      // Silme: son çizginin üzerinde geri giderken filamentin bir kısmını geri çek (uçtaki damlayı siler)
+      var wiped = 0;
+      if (S.wipe && lastPath && lastPath.length > 1 && S.wipeDistance > 0) {
+        var wl = S.wipeDistance, part = L * S.wipeRetractPart / 100, spdW = S.travelSpeed * 0.8, walked = 0;
+        out.push('G1 E-' + f3(L - part) + ' F' + Math.round(retractSpd() * 60));
+        stats.time += (L - part) / retractSpd();
+        for (var wi = lastPath.length - 2; wi >= 0 && walked < wl; wi--) {
+          var q = lastPath[wi], seg = Math.hypot(q[0] - pos.x, q[1] - pos.y);
+          if (seg < 0.01) continue;
+          var take = Math.min(seg, wl - walked), tx = pos.x + (q[0] - pos.x) * take / seg, ty = pos.y + (q[1] - pos.y) * take / seg;
+          var e = part * take / wl;
+          out.push('G1 X' + f3(tx) + ' Y' + f3(ty) + ' E-' + f5(e) + ' F' + Math.round(spdW * 60));
+          stats.time += take / spdW; wiped += e; walked += take;
+          preview.push(pos.x, pos.y, pos.z, tx, ty, pos.z, T.TRAVEL, extruder, 0, 0, spdW);
+          pos.x = tx; pos.y = ty;
+        }
+        if (part - wiped > 0.0001) out.push('G1 E-' + f3(part - wiped) + ' F' + Math.round(retractSpd() * 60));
+        curF = 0;
+      } else {
+        out.push('G1 E-' + f3(L) + ' F' + Math.round(retractSpd() * 60));
+        stats.time += L / retractSpd();
+      }
+      lastPath = null;
       retracted = true;
+      stats.retracts++;
       var zh = zHop();
       if (zh > 0) out.push('G1 Z' + f3(pos.z + zh) + ' F' + Math.round(S.zSpeed * 60));
     }
@@ -766,14 +873,30 @@
       var dx = x - pos.x, dy = y - pos.y;
       var d = Math.sqrt(dx * dx + dy * dy);
       if (d < 0.01) return;
-      if (d > S.retractMinTravel) retract();
+      // Parçanın içinde kalan bir yol varsa onu izle; parçanın dışına çıkmıyorsa geri çekme gerekmez
+      var route = null;
+      if (comb && S.avoidCrossingWalls && d > 0.5) {
+        route = combRoute(comb, pos.x, pos.y, x, y, 160);
+        if (route) {
+          var L = 0, px = pos.x, py = pos.y;
+          route.forEach(function (q) { L += Math.hypot(q[0] - px, q[1] - py); px = q[0]; py = q[1]; });
+          if (L > d * S.combMaxDetour + 5) route = null; // çok uzun dolambaç: düz git, geri çek
+        }
+      }
+      if (route) stats.combed++;
+      if (route ? (!S.retractOnlyCrossing && d > S.retractMinTravel) : d > S.retractMinTravel) retract();
       var spd = sp || S.travelSpeed;
       setAccel(S.accelTravel);
-      out.push('G0 X' + f3(x) + ' Y' + f3(y) + ' F' + Math.round(spd * 60));
+      (route || [[x, y]]).forEach(function (q) {
+        var dd = Math.hypot(q[0] - pos.x, q[1] - pos.y);
+        if (dd < 0.01) return;
+        out.push('G0 X' + f3(q[0]) + ' Y' + f3(q[1]) + ' F' + Math.round(spd * 60));
+        stats.time += moveTime(dd, spd, Math.min(S.accelTravel, S.machineMaxAccel)); // süre, sonraki yolun türüne yazılır
+        preview.push(pos.x, pos.y, pos.z, q[0], q[1], pos.z, T.TRAVEL, extruder, 0, 0, spd); // kafa hareketi önizlemesi için hep kaydedilir
+        pos.x = q[0]; pos.y = q[1];
+      });
       curF = spd;
-      stats.time += moveTime(d, spd, Math.min(S.accelTravel, S.machineMaxAccel)); // süre, sonraki yolun türüne yazılır
-      preview.push(pos.x, pos.y, pos.z, x, y, pos.z, T.TRAVEL, extruder, 0, 0, spd); // kafa hareketi önizlemesi için hep kaydedilir
-      pos.x = x; pos.y = y;
+      lastPath = null;
     }
     // pts: [[x,y]] ya da spiral için [[x,y,z]]
     // Klipper köşe hızı (square corner velocity -> junction deviation)
@@ -830,6 +953,7 @@
         preview.push(pos.x, pos.y, pos.z, x, y, z, type, extruder, width, height, sp);
         pos.x = x; pos.y = y; pos.z = z;
       }
+      lastPath = pts;
       addTime(type, pathTime(seg, sp, Math.min(accel || S.accelDefault, S.machineMaxAccel)));
     }
     // Değişken genişlikli yol: pts = [[x, y, genişlik], ...]
@@ -859,6 +983,7 @@
         preview.push(pos.x, pos.y, pos.z, x, y, pos.z, type, extruder, w, height, sp);
         pos.x = x; pos.y = y;
       }
+      lastPath = pts;
       addTime(type, pathTime(seg, sp, Math.min(accel || S.accelDefault, S.machineMaxAccel)));
     }
     function emitLinesJoined(lines, speed, width, height, type, accel, flow, monotonic) {
@@ -1065,6 +1190,17 @@
       var h = Ly.h;
       var spiral = S.spiralVase && li >= S.spiralStart;
       layerIndex.push(preview.length / PV);
+      comb = null;
+      if (S.avoidCrossingWalls && !spiral) {
+        var reg = [], nodes = [];
+        parts.forEach(function (p) {
+          var r0 = p.regions[li]; if (!r0 || !r0.outline.length) return;
+          var wo0 = li === 0 ? W.first : W.outer;
+          reg = reg.concat(offset(r0.outline, -wo0 / 2 + 0.05, false));
+          nodes = nodes.concat(offset(r0.outline, -wo0 * 1.1, false));
+        });
+        if (reg.length) comb = combContext(union(reg), union(nodes));
+      }
 
       out.push(';LAYER_CHANGE', ';Z:' + f3(Ly.z), ';HEIGHT:' + f3(h), ';LAYER:' + li);
       out.push('SET_PRINT_STATS_INFO CURRENT_LAYER=' + (li + 1));
@@ -1345,7 +1481,7 @@
     // Başlık bloğu: Moonraker/Fluidd dilimleyiciyi "; generated by AD SÜRÜM on TARİH at SAAT" satırından tanır
     var now = new Date(), p2 = function (n) { return (n < 10 ? '0' : '') + n; };
     header.push('; HEADER_BLOCK_START');
-    header.push('; generated by K1MaxDilimleyici 2.2 on ' + now.getFullYear() + '-' + p2(now.getMonth() + 1) + '-' + p2(now.getDate()) +
+    header.push('; generated by K1MaxDilimleyici 2.3 on ' + now.getFullYear() + '-' + p2(now.getMonth() + 1) + '-' + p2(now.getDate()) +
       ' at ' + p2(now.getHours()) + ':' + p2(now.getMinutes()) + ':' + p2(now.getSeconds()));
     header.push('; total layer number: ' + nL);
     header.push('; HEADER_BLOCK_END', '');
@@ -1384,7 +1520,7 @@
       preview: new Float32Array(preview),
       layerIndex: layerIndex,
       layerZ: layers.map(function (l) { return l.z; }),
-      stats: { time: timeS, filamentMm: totMm, grams: totG, cost: totCost, layers: nL, toolChanges: stats.toolChanges, perSlot: perSlot,
+      stats: { time: timeS, filamentMm: totMm, grams: totG, cost: totCost, layers: nL, toolChanges: stats.toolChanges, perSlot: perSlot, retracts: stats.retracts, combed: stats.combed,
         timeByType: Object.keys(stats.byType).reduce(function (o, k) { o[k] = Math.round(stats.byType[k] * S.timeFactor * 10) / 10; return o; }, {}) }
     };
   }
