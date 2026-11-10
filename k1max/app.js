@@ -10,6 +10,32 @@ const STORE_KEY = 'k1max-slicer-v2';
 const bridge = window.AndroidBridge || null;
 const clone = (o) => JSON.parse(JSON.stringify(o));
 
+// Kalıcı depo: Android uygulamasında SharedPreferences (WebView'in yerel deposu file:// sayfada güvenilir değil),
+// tarayıcıda localStorage.
+const store = {
+  get(k) {
+    try { if (bridge && bridge.storeGet) { const v = bridge.storeGet(k); if (v !== null && v !== undefined) return v; } } catch (e) { /* yok */ }
+    try { return localStorage.getItem(k); } catch (e) { return null; }
+  },
+  set(k, v) {
+    let ok = false;
+    try { if (bridge && bridge.storeSet) { bridge.storeSet(k, v); ok = true; } } catch (e) { /* yok */ }
+    try { localStorage.setItem(k, v); ok = true; } catch (e) { if (!ok) throw e; }
+  },
+  remove(k) {
+    try { if (bridge && bridge.storeRemove) bridge.storeRemove(k); } catch (e) { /* yok */ }
+    try { localStorage.removeItem(k); } catch (e) { /* yok */ }
+  },
+};
+// Büyük metni (G-code) Android'e parça parça aktar; geçici dosyanın kimliğini döndürür
+function toBlob(text, id) {
+  id = id || 'gcode';
+  if (!bridge.blobBegin(id)) throw new Error('geçici dosya oluşturulamadı');
+  const CH = 512 * 1024;
+  for (let i = 0; i < text.length; i += CH) if (!bridge.blobAppend(id, text.slice(i, i + CH))) throw new Error('geçici dosyaya yazılamadı');
+  return id;
+}
+
 // ================================================================= durum ve profiller
 let state = null;
 state = loadState();
@@ -38,7 +64,7 @@ function defaultState() {
 function loadState() {
   let s = defaultState();
   try {
-    const raw = localStorage.getItem(STORE_KEY);
+    const raw = store.get(STORE_KEY);
     if (raw) {
       const st = JSON.parse(raw);
       if (st && st.printer && st.process && Array.isArray(st.slots)) s = Object.assign(s, st);
@@ -55,7 +81,7 @@ function loadState() {
   return s;
 }
 function saveState() {
-  try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) { /* yok say */ }
+  try { store.set(STORE_KEY, JSON.stringify(state)); } catch (e) { /* yok say */ }
 }
 function working(cat) { return cat === 'filament' ? state.slots[state.filSlot] : state[cat]; }
 function isModified(cat, w) {
@@ -288,7 +314,7 @@ $('importProfile').addEventListener('change', async (e) => {
 });
 $('resetAll').addEventListener('click', async () => {
   if (!(await confirmDlg('Fabrika ayarları', 'Kendi profilleriniz dahil tüm ayarlar silinecek.', 'Hepsini sıfırla'))) return;
-  try { localStorage.removeItem(STORE_KEY); } catch (e) { /* yok */ }
+  store.remove(STORE_KEY);
   state = loadState(); renderAll(); buildBed(); placeAll(); toast('Varsayılan K1 Max ayarlarına dönüldü.');
 });
 
@@ -296,10 +322,10 @@ $('bedTexFile').addEventListener('change', async (e) => {
   const f = e.target.files[0]; e.target.value = '';
   if (!f) return;
   const url = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(f); });
-  try { localStorage.setItem(BED_TEX_KEY, url); buildBed(); toast('Tabla dokusu güncellendi.'); }
+  try { store.set(BED_TEX_KEY, url); buildBed(); toast('Tabla dokusu güncellendi.'); }
   catch (err) { toast('Resim çok büyük, saklanamadı. Daha küçük bir resim deneyin (en fazla ~4 MB).', true); }
 });
-$('bedTexReset').addEventListener('click', () => { try { localStorage.removeItem(BED_TEX_KEY); } catch (e) { /* yok */ } buildBed(); });
+$('bedTexReset').addEventListener('click', () => { store.remove(BED_TEX_KEY); buildBed(); });
 
 // ================================================================= Model sekmesi: hızlı seçim ve yuvalar
 function renderQuick() {
@@ -398,7 +424,7 @@ function gridCanvasTexture(bx, by) {
 }
 function bedTexture(bx, by, cb) {
   let custom = null;
-  try { custom = localStorage.getItem(BED_TEX_KEY); } catch (e) { /* yok */ }
+  custom = store.get(BED_TEX_KEY);
   if (custom) {
     new THREE.TextureLoader().load(custom, t => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = renderer.capabilities.getMaxAnisotropy(); cb(t, true); },
       undefined, () => cb(gridCanvasTexture(bx, by), false));
@@ -721,7 +747,8 @@ function slice() {
   if (!parts.length || $('slice').disabled) return;
   const job = buildJob();
   if (job.S.thumbnail) {
-    try { job.thumbnail = makeThumbnail(+job.S.thumbnailSize || 300); } catch (e) { job.thumbnail = null; }
+    try { job.thumbnails = makeThumbnails([96, +job.S.thumbnailSize || 300]); }
+    catch (e) { job.thumbnails = null; toast('Önizleme resmi oluşturulamadı: ' + e.message, true); }
   }
   if (worker) worker.terminate();
   $('busy').hidden = false; $('busyBar').style.width = '0%'; $('busyText').textContent = 'Hazırlanıyor…';
@@ -1024,22 +1051,50 @@ function clearPreview() {
   updateButtons();
 }
 
-// Fluidd/Mainsail için önizleme resmi
-let thumbRenderer = null;
-function makeThumbnail(size) {
-  if (!thumbRenderer) thumbRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
-  thumbRenderer.setPixelRatio(1);
-  thumbRenderer.setSize(size, size, false);
+// G-code önizleme resimleri (K1 ekranı ve Fluidd/Mainsail): OrcaSlicer'ın K1 Max profili gibi 96x96 ve 300x300 PNG.
+// Ana çizicide, ekran dışı bir hedefe çizilir (ikinci bir WebGL bağlamı açmaz; Android WebView'de daha güvenilir).
+function makeThumbnails(sizes) {
   const sc = new THREE.Scene();
   addLights(sc);
   const bb = new THREE.Box3();
   parts.forEach(p => { sc.add(new THREE.Mesh(p.mesh.geometry, p.mesh.material)); bb.union(p.mesh.geometry.boundingBox); });
-  const c = bb.getCenter(new THREE.Vector3()), r = bb.getSize(new THREE.Vector3()).length() / 2;
+  const c = bb.getCenter(new THREE.Vector3()), r = Math.max(1, bb.getSize(new THREE.Vector3()).length() / 2);
   const cam = new THREE.PerspectiveCamera(35, 1, 0.1, 5000); cam.up.set(0, 0, 1);
   const d = r / Math.sin(THREE.MathUtils.degToRad(17.5)) * 1.05;
   cam.position.set(c.x - d * 0.5, c.y - d * 0.7, c.z + d * 0.5); cam.lookAt(c);
-  thumbRenderer.render(sc, cam);
-  return { w: size, h: size, b64: thumbRenderer.domElement.toDataURL('image/png').split(',')[1] };
+  const prevColor = renderer.getClearColor(new THREE.Color()), prevAlpha = renderer.getClearAlpha();
+  const out = [];
+  // doğrusal -> sRGB dönüşüm tablosu (çizim hedefi doğrusal renk uzayında)
+  const lut = new Uint8ClampedArray(256);
+  for (let i = 0; i < 256; i++) { const v = i / 255; lut[i] = Math.round(255 * (v <= 0.0031308 ? v * 12.92 : 1.055 * Math.pow(v, 1 / 2.4) - 0.055)); }
+  try {
+    renderer.setClearColor(0x000000, 0);
+    sizes.forEach(size => {
+      const R = Math.min(1024, size * 2); // 2x çizip küçült: kenar yumuşatma
+      const rt = new THREE.WebGLRenderTarget(R, R);
+      renderer.setRenderTarget(rt);
+      renderer.clear();
+      renderer.render(sc, cam);
+      const px = new Uint8Array(R * R * 4);
+      renderer.readRenderTargetPixels(rt, 0, 0, R, R, px);
+      renderer.setRenderTarget(null);
+      rt.dispose();
+      const big = document.createElement('canvas'); big.width = big.height = R;
+      const bctx = big.getContext('2d'), img = bctx.createImageData(R, R);
+      for (let y = 0; y < R; y++) for (let x = 0; x < R; x++) {
+        const si = ((R - 1 - y) * R + x) * 4, di = (y * R + x) * 4; // dikey çevir
+        img.data[di] = lut[px[si]]; img.data[di + 1] = lut[px[si + 1]]; img.data[di + 2] = lut[px[si + 2]]; img.data[di + 3] = px[si + 3];
+      }
+      bctx.putImageData(img, 0, 0);
+      const cv = document.createElement('canvas'); cv.width = cv.height = size;
+      const ctx = cv.getContext('2d'); ctx.imageSmoothingQuality = 'high'; ctx.drawImage(big, 0, 0, size, size);
+      out.push({ w: size, h: size, b64: cv.toDataURL('image/png').split(',')[1] });
+    });
+  } finally {
+    renderer.setRenderTarget(null);
+    renderer.setClearColor(prevColor, prevAlpha);
+  }
+  return out;
 }
 
 // ================================================================= dosya çıktısı
@@ -1053,7 +1108,13 @@ function gcodeName() {
 $('download').addEventListener('click', () => { if (result) download(new Blob([result.gcode], { type: 'text/plain' }), result.name); });
 
 function download(blob, name) {
-  if (bridge) { blob.text().then(t => toast(bridge.saveFile(name, t))); return; }
+  if (bridge) {
+    blob.text().then(t => {
+      try { toast(bridge.blobBegin ? bridge.saveBlob(name, toBlob(t)) : bridge.saveFile(name, t)); }
+      catch (e) { toast('Kaydedilemedi: ' + e.message, true); }
+    });
+    return;
+  }
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = name;
   document.body.appendChild(a); a.click(); a.remove();
@@ -1093,7 +1154,15 @@ function http(method, url, opts = {}) {
       httpPending.set(id, { resolve, reject, onProgress: opts.onProgress });
       const meta = { method, url, headers, timeout: opts.timeout || 8000,
         upload: opts.upload ? { field: 'file', filename: opts.upload.name, fields: opts.upload.fields || {} } : null };
-      bridge.http(id, JSON.stringify(meta), opts.upload ? opts.upload.content : (opts.body || ''));
+      let body = opts.body || '';
+      if (opts.upload) {
+        // büyük G-code'u köprüden tek parça geçirmek yerine geçici dosyaya parça parça yaz
+        if (bridge.blobBegin) {
+          try { meta.upload.blob = toBlob(opts.upload.content, 'upload'); }
+          catch (e) { httpPending.delete(id); reject(e); return; }
+        } else body = opts.upload.content;
+      }
+      bridge.http(id, JSON.stringify(meta), body);
     });
   }
   return new Promise((resolve, reject) => {
@@ -1175,10 +1244,18 @@ async function pollStatus() {
     $('devPause').disabled = dev.state !== 'printing';
     $('devResume').disabled = dev.state !== 'paused';
     $('devCancel').disabled = !(dev.state === 'printing' || dev.state === 'paused');
+    dev.fail = 0;
   } catch (e) {
     $('stState').textContent = 'Bağlantı yok';
+    dev.fail = (dev.fail || 0) + 1;
+    if (dev.fail >= 2) { dev.fail = 0; dev.connected = false; connect(true); } // kopan bağlantıyı sessizce yeniden kur
   }
 }
+// Uygulamaya/sekmeye geri dönünce bağlantıyı tazele
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden || !state.printer.values.hostIp) return;
+  if (dev.connected) pollStatus(); else connect(true);
+});
 function startPolling() { stopPolling(); dev.timer = setInterval(() => { if (!document.hidden && (document.body.dataset.tab === 'device' || window.innerWidth > 820)) pollStatus(); }, 3000); }
 function stopPolling() { if (dev.timer) clearInterval(dev.timer); dev.timer = null; }
 async function printerCmd(path, okMsg) {
@@ -1314,7 +1391,11 @@ const canShareFiles = (() => {
 if (canShareFiles || bridge) $('mShare').hidden = false;
 $('mShare').addEventListener('click', async () => {
   if (!result) return;
-  if (bridge) { bridge.shareFile(result.name, result.gcode); return; }
+  if (bridge) {
+    try { if (bridge.blobBegin) bridge.shareBlob(result.name, toBlob(result.gcode)); else bridge.shareFile(result.name, result.gcode); }
+    catch (e) { toast('Paylaşılamadı: ' + e.message, true); }
+    return;
+  }
   try { await navigator.share({ files: [new File([result.gcode], result.name, { type: 'text/plain' })], title: result.name }); }
   catch (e) { if (e.name !== 'AbortError') toast('Paylaşılamadı, İndir düğmesini kullanın.', true); }
 });
@@ -1391,3 +1472,14 @@ renderAll();
 setTab('model');
 updateButtons(false);
 if (state.printer.values.hostIp) connect(true);
+
+// Hata görünürlüğü: beklenmeyen JS hataları ekranda gösterilir; Android'de önceki çökme kaydı açılışta gösterilir
+window.addEventListener('error', (e) => toast('Hata: ' + (e.message || 'bilinmeyen'), true));
+window.addEventListener('unhandledrejection', (e) => toast('Hata: ' + ((e.reason && e.reason.message) || e.reason || 'bilinmeyen'), true));
+try {
+  const crash = bridge && bridge.lastCrash ? bridge.lastCrash() : null;
+  if (crash) {
+    dialog('Önceki açılışta bir sorun oldu', '<p class="hint">Bu metnin ekran görüntüsünü gönderirseniz sorunu bulabiliriz.</p><textarea id="crashText" readonly style="min-height:180px"></textarea>',
+      [[null, 'Kapat', 'primary']], () => { $('crashText').value = crash; });
+  }
+} catch (e) { /* yok */ }

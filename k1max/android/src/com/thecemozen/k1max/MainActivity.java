@@ -58,10 +58,25 @@ public class MainActivity extends Activity {
     private ValueCallback<Uri[]> fileCallback;
     private boolean pageReady = false;
     private Intent pendingIntent;
+    private android.content.SharedPreferences prefs;
 
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
+        prefs = getSharedPreferences("k1max", MODE_PRIVATE);
+        // Çökme olursa nedenini kaydet: sonraki açılışta kullanıcıya gösterilir
+        final Thread.UncaughtExceptionHandler prev = Thread.getDefaultUncaughtExceptionHandler();
+        Thread.setDefaultUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
+            @Override public void uncaughtException(Thread t, Throwable e) {
+                try {
+                    java.io.StringWriter sw = new java.io.StringWriter();
+                    e.printStackTrace(new java.io.PrintWriter(sw));
+                    String st = sw.toString();
+                    prefs.edit().putString("lastCrash", "Uygulama hatası (" + t.getName() + "):\n" + st.substring(0, Math.min(3000, st.length()))).commit();
+                } catch (Throwable ignored) { }
+                if (prev != null) prev.uncaughtException(t, e);
+            }
+        });
         // Android 7-9'da paylaşılan dosya için file:// adresine izin ver
         StrictMode.setVmPolicy(new StrictMode.VmPolicy.Builder().build());
 
@@ -84,6 +99,15 @@ public class MainActivity extends Activity {
             public void onPageFinished(WebView view, String url) {
                 pageReady = true;
                 if (pendingIntent != null) { handleIntent(pendingIntent); pendingIntent = null; }
+            }
+            // API 26+: WebView'in çizim süreci (çoğunlukla bellek yetersizliğinden) ölürse uygulama kapanmasın,
+            // nedeni kaydedilip etkinlik yeniden açılsın. (API 23'e karşı derlendiği için @Override yok.)
+            public boolean onRenderProcessGone(WebView view, android.webkit.RenderProcessGoneDetail detail) {
+                prefs.edit().putString("lastCrash", "Önizleme/çizim süreci kapandı (büyük ihtimalle bellek yetersiz kaldı). "
+                    + "Daha küçük bir model deneyin ya da diğer uygulamaları kapatın.").commit();
+                try { ((android.view.ViewGroup) view.getParent()).removeView(view); view.destroy(); } catch (Throwable ignored) { }
+                recreate();
+                return true;
             }
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, String url) {
@@ -174,11 +198,42 @@ public class MainActivity extends Activity {
 
     // ------------------------------------------------------------------ JS köprüsü
     private class Bridge {
+        // ---- kalıcı ayarlar (WebView'in yerel deposu file:// sayfalarda güvenilir değil)
+        @JavascriptInterface public String storeGet(String key) { return prefs.getString("s_" + key, null); }
+        @JavascriptInterface public void storeSet(String key, String value) { prefs.edit().putString("s_" + key, value).apply(); }
+        @JavascriptInterface public void storeRemove(String key) { prefs.edit().remove("s_" + key).apply(); }
+        /** Son çökme kaydını döndürür ve siler (yoksa null). */
+        @JavascriptInterface public String lastCrash() {
+            String c = prefs.getString("lastCrash", null);
+            if (c != null) prefs.edit().remove("lastCrash").apply();
+            return c;
+        }
+
+        // ---- büyük veri (G-code) parça parça: tek seferde koca bir metin köprüden geçmesin
+        @JavascriptInterface public boolean blobBegin(String id) {
+            File f = blobFile(id); if (f.exists()) f.delete();
+            try { return f.createNewFile(); } catch (Exception e) { return false; }
+        }
+        @JavascriptInterface public boolean blobAppend(String id, String chunk) {
+            try (FileOutputStream os = new FileOutputStream(blobFile(id), true)) { os.write(chunk.getBytes(StandardCharsets.UTF_8)); return true; }
+            catch (Exception e) { return false; }
+        }
+        @JavascriptInterface public String saveBlob(String name, String id) {
+            try {
+                Uri uri = writeToDownloads(name, blobFile(id));
+                return uri != null ? "İndirilenler klasörüne kaydedildi: " + name : "Kaydedilemedi.";
+            } catch (Exception e) { return "Kaydedilemedi: " + e.getMessage(); }
+        }
+        @JavascriptInterface public void shareBlob(String name, String id) {
+            try { shareUri(name, writeToDownloads(name, blobFile(id))); }
+            catch (Exception e) { toastJs("Paylaşılamadı: " + e.getMessage()); }
+        }
+
         /** G-code / profil dosyasını İndirilenler klasörüne kaydeder; kullanıcıya gösterilecek mesajı döndürür. */
         @JavascriptInterface
         public String saveFile(String name, String content) {
             try {
-                Uri uri = writeToDownloads(name, content);
+                Uri uri = writeToDownloads(name, stringToTemp(content));
                 return uri != null ? "İndirilenler klasörüne kaydedildi: " + name : "Kaydedilemedi.";
             } catch (Exception e) {
                 return "Kaydedilemedi: " + e.getMessage();
@@ -189,16 +244,7 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void shareFile(String name, String content) {
             try {
-                Uri uri = writeToDownloads(name, content);
-                if (uri == null) { toastJs("Paylaşılamadı."); return; }
-                Intent send = new Intent(Intent.ACTION_SEND);
-                send.setType("text/x-gcode");
-                send.putExtra(Intent.EXTRA_STREAM, uri);
-                send.putExtra(Intent.EXTRA_SUBJECT, name);
-                send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                final Intent chooser = Intent.createChooser(send, "G-code'u paylaş");
-                chooser.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                runOnUiThread(new Runnable() { @Override public void run() { startActivity(chooser); } });
+                shareUri(name, writeToDownloads(name, stringToTemp(content)));
             } catch (Exception e) {
                 toastJs("Paylaşılamadı: " + e.getMessage());
             }
@@ -262,16 +308,18 @@ public class MainActivity extends Activity {
                    .append(up.optString("field", "file")).append("\"; filename=\"").append(up.getString("filename").replace("\"", "_"))
                    .append("\"\r\nContent-Type: application/octet-stream\r\n\r\n");
                 byte[] head = pre.toString().getBytes(StandardCharsets.UTF_8);
-                byte[] data = body.getBytes(StandardCharsets.UTF_8);
                 byte[] tail = ("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8);
-                c.setFixedLengthStreamingMode((long) head.length + data.length + tail.length);
-                try (OutputStream os = c.getOutputStream()) {
+                // Dosya içeriği: önceden parça parça yazılmış geçici dosyadan (blob) ya da doğrudan metinden
+                File src = up.has("blob") ? blobFile(up.getString("blob")) : stringToTemp(body);
+                long len = src.length();
+                c.setFixedLengthStreamingMode((long) head.length + len + tail.length);
+                try (OutputStream os = c.getOutputStream(); InputStream in = new java.io.FileInputStream(src)) {
                     os.write(head);
-                    int chunk = 256 * 1024, lastPct = -1;
-                    for (int off = 0; off < data.length; off += chunk) {
-                        os.write(data, off, Math.min(chunk, data.length - off));
-                        int pct = (int) (100L * (off + chunk) / Math.max(1, data.length));
-                        if (pct / 5 != lastPct / 5) { lastPct = pct; jsCall("window.k1HttpProgress&&k1HttpProgress('" + id + "'," + Math.min(1.0, pct / 100.0) + ")"); }
+                    byte[] buf = new byte[256 * 1024]; int n; long sent = 0; int lastPct = -1;
+                    while ((n = in.read(buf)) > 0) {
+                        os.write(buf, 0, n); sent += n;
+                        int pct = (int) (100L * sent / Math.max(1, len));
+                        if (pct / 5 != lastPct / 5) { lastPct = pct; jsCall("window.k1HttpProgress&&k1HttpProgress('" + id + "'," + (pct / 100.0) + ")"); }
                     }
                     os.write(tail);
                 }
@@ -334,8 +382,31 @@ public class MainActivity extends Activity {
         jsCall("window.k1ScanCb('" + id + "'," + jsString(arr.toString()) + ")");
     }
 
-    private Uri writeToDownloads(String name, String content) throws Exception {
-        byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
+    private File blobFile(String id) { return new File(getCacheDir(), "blob_" + id.replaceAll("[^A-Za-z0-9_]", "_")); }
+    private File stringToTemp(String content) throws Exception {
+        File f = blobFile("tmp");
+        try (FileOutputStream os = new FileOutputStream(f, false)) { os.write(content.getBytes(StandardCharsets.UTF_8)); }
+        return f;
+    }
+    private void shareUri(String name, Uri uri) {
+        if (uri == null) { toastJs("Paylaşılamadı."); return; }
+        Intent send = new Intent(Intent.ACTION_SEND);
+        send.setType("text/x-gcode");
+        send.putExtra(Intent.EXTRA_STREAM, uri);
+        send.putExtra(Intent.EXTRA_SUBJECT, name);
+        send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        final Intent chooser = Intent.createChooser(send, "G-code'u paylaş");
+        chooser.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        runOnUiThread(new Runnable() { @Override public void run() { startActivity(chooser); } });
+    }
+    private static void copyFile(File src, OutputStream os) throws Exception {
+        try (InputStream in = new java.io.FileInputStream(src)) {
+            byte[] buf = new byte[256 * 1024]; int n;
+            while ((n = in.read(buf)) > 0) os.write(buf, 0, n);
+        }
+    }
+
+    private Uri writeToDownloads(String name, File src) throws Exception {
         String mime = name.endsWith(".json") ? "application/json" : "text/x-gcode";
         if (Build.VERSION.SDK_INT >= 29) {
             // MediaStore.Downloads (API 29); derleme API 23'e karşı yapıldığı için yansıma ile
@@ -348,7 +419,7 @@ public class MainActivity extends Activity {
             ContentResolver cr = getContentResolver();
             Uri uri = cr.insert(collection, v);
             if (uri == null) return null;
-            try (OutputStream os = cr.openOutputStream(uri)) { os.write(bytes); }
+            try (OutputStream os = cr.openOutputStream(uri)) { copyFile(src, os); }
             return uri;
         } else {
             if (checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) != 0) {
@@ -358,7 +429,7 @@ public class MainActivity extends Activity {
             File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "K1Max");
             if (!dir.exists() && !dir.mkdirs()) throw new Exception("klasör oluşturulamadı");
             File f = new File(dir, name);
-            try (FileOutputStream os = new FileOutputStream(f)) { os.write(bytes); }
+            try (FileOutputStream os = new FileOutputStream(f)) { copyFile(src, os); }
             return Uri.fromFile(f);
         }
     }

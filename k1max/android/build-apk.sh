@@ -15,8 +15,10 @@ OUT="${OUT:-../dist/K1MaxDilimleyici.apk}"
 
 rm -rf build && mkdir -p build/classes build/dex
 echo "1/5 Java derleniyor"
+mkdir -p build/stubs
+javac -source 8 -target 8 -nowarn -Xlint:-options -encoding UTF-8 -bootclasspath "$ANDROID_JAR" -d build/stubs $(find stubs -name '*.java')
 javac -source 8 -target 8 -nowarn -Xlint:-options -encoding UTF-8 \
-  -bootclasspath "$ANDROID_JAR" -d build/classes $(find src -name '*.java')
+  -bootclasspath "$ANDROID_JAR" -classpath build/stubs -d build/classes $(find src -name '*.java')
 
 echo "2/5 DEX üretiliyor"
 "$DX" --dex --min-sdk-version=24 --output=build/dex/classes.dex build/classes
