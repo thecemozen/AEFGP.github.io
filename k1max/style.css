@@ -95,6 +95,7 @@ textarea { width: 100%; min-height: 90px; font-family: ui-monospace, Menlo, Cons
 .searchrow input { flex: 1; }
 .sw { width: 14px; height: 14px; border-radius: 4px; border: 1px solid rgba(0,0,0,.25); display: inline-block; flex: none; }
 
+.parts .part.on { background: var(--chip); border-radius: 6px; }
 .slots .slot, .parts .part { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); }
 .slots .slot:last-child, .parts .part:last-child { border-bottom: 0; }
 .slot b { width: 18px; text-align: center; color: var(--muted); }
@@ -140,6 +141,10 @@ select.mini { padding: 4px 6px; }
 .stats b { color: var(--text); }
 .err { color: var(--danger); }
 .step { min-width: 34px; }
+.inp.tri input { width: 62px; }
+.inp input + input { margin-left: 4px; }
+.edithint { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); z-index: 2; background: var(--card); border: 1px solid var(--line);
+  border-radius: 999px; padding: 5px 12px; font-size: 12px; color: var(--muted); white-space: nowrap; max-width: calc(100% - 20px); overflow: hidden; text-overflow: ellipsis; }
 
 .modal { position: fixed; inset: 0; z-index: 20; background: rgba(0,0,0,.45); display: grid; place-items: center; padding: 16px; }
 .modal .sheet { background: var(--card); border-radius: 14px; padding: 16px; width: min(440px, 100%); max-height: 90vh; overflow: auto; box-shadow: 0 20px 50px rgba(0,0,0,.35); }

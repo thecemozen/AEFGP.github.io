@@ -497,8 +497,12 @@ function setView(v) {
 }
 document.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click', () => setView(b.dataset.view)));
 
-// ================================================================= parçalar
-let parts = []; // { name, geom (model uzayı), slot, mesh }
+// ================================================================= nesneler ve parçalar
+// Her yüklenen dosya bir "nesne"dir: kendi konumu (x, y), Z dönüşü ve eksen başına ölçeği vardır.
+// Parçaların geometrisi nesnenin yerel koordinatlarında tutulur (XY merkezi 0, taban z=0).
+let parts = []; // { name, geom (yerel), slot, mesh, flowMul, obj }
+let objects = []; // { id, name, x, y, rotZ, sx, sy, sz, origin: {x,y,z} }
+let objSeq = 0, selObj = null;
 const partsGroup = new THREE.Group();
 scene.add(partsGroup);
 
@@ -506,103 +510,368 @@ function partMaterial(slot) {
   return new THREE.MeshStandardMaterial({ color: state.slots[slot] ? state.slots[slot].color : '#2fa36b', roughness: 0.55, metalness: 0.05 });
 }
 function recolorParts() { parts.forEach(p => { if (p.mesh) p.mesh.material.color.set(state.slots[p.slot].color); }); }
+const objParts = (o) => parts.filter(p => p.obj === o);
 
-function addParts(list, replace, keepCalib) {
+function bboxOfArrays(list) {
+  const b = new THREE.Box3();
+  list.forEach(a => { for (let i = 0; i < a.length; i += 3) b.expandByPoint(new THREE.Vector3(a[i], a[i + 1], a[i + 2])); });
+  return b;
+}
+// nesnenin yerel geometrisini yeniden merkezle (XY merkezi 0, taban 0); kaydırmayı origin'e işle
+function normalizeObject(o) {
+  const b = new THREE.Box3();
+  objParts(o).forEach(p => { p.geom.computeBoundingBox(); b.union(p.geom.boundingBox); });
+  if (b.isEmpty()) return;
+  const c = new THREE.Vector3((b.min.x + b.max.x) / 2, (b.min.y + b.max.y) / 2, b.min.z);
+  if (c.lengthSq() < 1e-12) return;
+  objParts(o).forEach(p => p.geom.translate(-c.x, -c.y, -c.z));
+  o.origin = { x: o.origin.x + c.x, y: o.origin.y + c.y, z: o.origin.z + c.z };
+}
+function worldGeom(p) {
+  const o = p.obj, g = p.geom.clone();
+  g.scale(o.sx, o.sy, o.sz); g.rotateZ(o.rotZ); g.translate(o.x, o.y, 0);
+  return g;
+}
+// nesnenin tabladaki kaplama dikdörtgeni (ölçek ve dönüş sonrası)
+function objFootprint(o) {
+  const b = new THREE.Box3();
+  objParts(o).forEach(p => { const g = p.geom.clone(); g.scale(o.sx, o.sy, o.sz); g.rotateZ(o.rotZ); g.computeBoundingBox(); b.union(g.boundingBox); });
+  return b; // nesne merkezine göre
+}
+// boş bir yer bul: tabla ortasından dışa doğru tara
+function placeFree(o, gap = 6) {
+  const B = bedSize(), f = objFootprint(o), others = objects.filter(q => q !== o).map(q => { const fb = objFootprint(q); return { x0: q.x + fb.min.x - gap, x1: q.x + fb.max.x + gap, y0: q.y + fb.min.y - gap, y1: q.y + fb.max.y + gap }; });
+  const fits = (x, y) => x + f.min.x >= 2 && x + f.max.x <= B.x - 2 && y + f.min.y >= 2 && y + f.max.y <= B.y - 2 &&
+    others.every(r => x + f.max.x < r.x0 || x + f.min.x > r.x1 || y + f.max.y < r.y0 || y + f.min.y > r.y1);
+  for (let r = 0; r <= Math.max(B.x, B.y); r += 4) {
+    const n = Math.max(1, Math.round(r * 2 * Math.PI / 6));
+    for (let k = 0; k < n; k++) { const a = k / n * Math.PI * 2, x = B.x / 2 + r * Math.cos(a), y = B.y / 2 + r * Math.sin(a); if (fits(x, y)) { o.x = x; o.y = y; return true; } }
+  }
+  o.x = B.x / 2; o.y = B.y / 2; return false;
+}
+function newObject(name, list) {
+  const b = bboxOfArrays(list.map(p => p.positions));
+  const B = bedSize();
+  const o = { id: ++objSeq, name: name || ('Nesne ' + objSeq), x: B.x / 2, y: B.y / 2, rotZ: 0, sx: 1, sy: 1, sz: 1,
+    origin: { x: (b.min.x + b.max.x) / 2, y: (b.min.y + b.max.y) / 2, z: b.min.z } };
+  objects.push(o);
+  return o;
+}
+function addParts(list, replace, keepCalib, asObject) {
   if (!keepCalib) setCalib(null);
-  if (replace) { parts.forEach(p => { partsGroup.remove(p.mesh); p.mesh.geometry.dispose(); }); parts = []; $('scale').value = 100; }
+  if (replace) { parts.forEach(p => { partsGroup.remove(p.mesh); p.mesh.geometry.dispose(); }); parts = []; objects = []; selObj = null; $('scale').value = 100; }
+  let o;
+  const fresh = replace || asObject || !objects.length;
+  if (fresh) o = newObject(list[0] && list[0].name ? list[0].name.replace(/ #\d+$/, '') : null, list);
+  else o = selObj || objects[objects.length - 1];
   list.forEach(p => {
+    const a = p.positions;
+    for (let i = 0; i < a.length; i += 3) { a[i] -= o.origin.x; a[i + 1] -= o.origin.y; a[i + 2] -= o.origin.z; }
     const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(p.positions, 3));
+    g.setAttribute('position', new THREE.BufferAttribute(a, 3));
     const mesh = new THREE.Mesh(new THREE.BufferGeometry(), partMaterial(p.slot || 0));
     partsGroup.add(mesh);
-    parts.push({ name: p.name, geom: g, slot: p.slot || 0, mesh, flowMul: p.flowMul || 1 });
+    parts.push({ name: p.name, geom: g, slot: p.slot || 0, mesh, flowMul: p.flowMul || 1, obj: o });
   });
-  placeAll();
+  normalizeObject(o);
+  if (fresh && !replace) placeFree(o);
+  placeAll(); focusModels();
   clearPreview();
-  renderParts();
+  renderParts(); renderObj();
 }
 
 function placeAll() {
-  const s = (parseFloat($('scale').value) || 100) / 100;
-  if (!parts.length) { $('modelInfo').textContent = 'Model yüklenmedi. STL ya da 3MF açın veya buraya sürükleyin.'; updateButtons(false); return; }
-  const bb = new THREE.Box3();
-  parts.forEach(p => { p.geom.computeBoundingBox(); bb.union(p.geom.boundingBox); });
-  const B = bedSize();
-  const off = new THREE.Vector3(B.x / 2 - (bb.min.x + bb.max.x) / 2 * s, B.y / 2 - (bb.min.y + bb.max.y) / 2 * s, -bb.min.z * s);
+  if (!parts.length) { $('modelInfo').textContent = 'Model yüklenmedi. STL ya da 3MF açın veya buraya sürükleyin.'; $('editHint').hidden = true; updateButtons(false); return; }
+  const B = bedSize(), all = new THREE.Box3();
   let tris = 0;
+  const objBox = new Map();
   parts.forEach(p => {
-    const g = p.geom.clone(); g.scale(s, s, s); g.translate(off.x, off.y, off.z); g.computeVertexNormals(); g.computeBoundingBox();
-    p.mesh.geometry.dispose(); p.mesh.geometry = g;
+    const g = worldGeom(p); g.computeVertexNormals(); g.computeBoundingBox();
+    p.mesh.geometry.dispose(); p.mesh.geometry = g; p.mesh.position.set(0, 0, 0);
     tris += g.attributes.position.count / 3;
+    all.union(g.boundingBox);
+    const ob = objBox.get(p.obj) || new THREE.Box3(); ob.union(g.boundingBox); objBox.set(p.obj, ob);
   });
-  const sx = (bb.max.x - bb.min.x) * s, sy = (bb.max.y - bb.min.y) * s, sz = (bb.max.z - bb.min.z) * s;
-  const fits = sx <= B.x && sy <= B.y && sz <= B.z;
-  $('modelInfo').innerHTML = `${sx.toFixed(1)} × ${sy.toFixed(1)} × ${sz.toFixed(1)} mm · ${tris.toLocaleString('tr-TR')} üçgen · ${parts.length} parça` +
-    (fits ? '' : '<br><span class="err">Model tablaya sığmıyor! Ölçeği küçültün.</span>');
+  let fits = true;
+  objBox.forEach((b, o) => {
+    const ok = b.min.x >= -0.01 && b.min.y >= -0.01 && b.max.x <= B.x + 0.01 && b.max.y <= B.y + 0.01 && b.max.z <= B.z;
+    o.ok = ok; if (!ok) fits = false;
+  });
+  parts.forEach(p => p.mesh.material.emissive.set(!p.obj.ok ? 0x550000 : (p.obj === selObj ? 0x1f5f3a : 0x000000)));
+  const sx = all.max.x - all.min.x, sy = all.max.y - all.min.y, sz = all.max.z - all.min.z;
+  $('modelInfo').innerHTML = `${sx.toFixed(1)} × ${sy.toFixed(1)} × ${sz.toFixed(1)} mm · ${tris.toLocaleString('tr-TR')} üçgen · ${objects.length} nesne, ${parts.length} parça` +
+    (fits ? '' : '<br><span class="err">Kırmızı nesne tablanın dışında ya da çok yüksek! Taşıyın veya küçültün.</span>');
   partsGroup.visible = $('showModel').checked || !result;
-  controls.target.set(B.x / 2, B.y / 2, sz / 2);
-  viewRadius = Math.min(560, Math.max(110, Math.max(sx, sy, sz) * 2.6));
-  parts.forEach(p => p.mesh.material.emissive.set(fits ? 0x000000 : 0x550000));
+  $('editHint').hidden = !partsGroup.visible;
   updateButtons(fits);
+}
+function focusModels() {
+  const all = new THREE.Box3();
+  parts.forEach(p => { if (p.mesh.geometry.boundingBox) all.union(p.mesh.geometry.boundingBox); });
+  if (all.isEmpty()) return;
+  const c = all.getCenter(new THREE.Vector3()), sz = all.getSize(new THREE.Vector3());
+  // hedefle birlikte kamerayı da kaydır: bakış yönü değişmesin (tepeden görünümde ters dönmesin)
+  const nt = new THREE.Vector3(c.x, c.y, sz.z / 2), d = nt.clone().sub(controls.target);
+  controls.target.copy(nt); camera.position.add(d);
+  viewRadius = Math.min(560, Math.max(110, Math.max(sz.x, sz.y, sz.z) * 2.6));
 }
 
 function renderParts() {
   const list = $('partList');
   list.innerHTML = '';
   parts.forEach((p, i) => {
-    const row = document.createElement('div'); row.className = 'part';
+    const row = document.createElement('div'); row.className = 'part' + (p.obj === selObj ? ' on' : '');
     const sw = document.createElement('span'); sw.className = 'sw'; sw.style.background = state.slots[p.slot].color;
-    const nm = document.createElement('span'); nm.className = 'name'; nm.textContent = p.name; nm.title = p.name;
+    const nm = document.createElement('span'); nm.className = 'name';
+    nm.textContent = (objects.length > 1 ? `N${objects.indexOf(p.obj) + 1} · ` : '') + p.name; nm.title = 'Seçmek için dokunun: ' + p.name;
+    nm.onclick = () => select(p.obj);
     const sel = document.createElement('select');
     state.slots.forEach((sl, k) => { const o = document.createElement('option'); o.value = k; o.textContent = `Yuva ${k + 1}`; sel.appendChild(o); });
     sel.value = p.slot;
     sel.onchange = () => { p.slot = +sel.value; p.mesh.material.color.set(state.slots[p.slot].color); sw.style.background = state.slots[p.slot].color; invalidate(); };
     const x = document.createElement('button'); x.className = 'x'; x.textContent = '✕'; x.title = 'Parçayı kaldır';
-    x.onclick = () => { partsGroup.remove(p.mesh); parts.splice(i, 1); placeAll(); clearPreview(); renderParts(); };
+    x.onclick = () => {
+      partsGroup.remove(p.mesh); parts.splice(i, 1);
+      if (!objParts(p.obj).length) { objects = objects.filter(o => o !== p.obj); if (selObj === p.obj) selObj = null; }
+      placeAll(); clearPreview(); renderParts(); renderObj();
+    };
     row.append(sw, nm, sel, x);
     list.appendChild(row);
   });
 }
 
-function transformAll(m) {
-  parts.forEach(p => p.geom.applyMatrix4(m));
-  placeAll(); clearPreview();
+// ---------------- seçim ve seçili nesne kartı
+function select(o) {
+  selObj = o || null;
+  placeAll(); renderParts(); renderObj();
+}
+function renderObj() {
+  $('xfTarget').textContent = selObj ? '(seçili nesne)' : '(tüm nesneler)';
+  $('objCard').hidden = !selObj;
+  const first = selObj || objects[0];
+  $('scale').value = first ? Math.round(first.sx * 100) : 100;
+  if (!selObj) return;
+  const o = selObj;
+  $('objName').textContent = o.name;
+  $('objX').value = o.x.toFixed(1); $('objY').value = o.y.toFixed(1);
+  $('objRot').value = Math.round(((o.rotZ * 180 / Math.PI) % 360 + 360) % 360);
+  $('objSX').value = Math.round(o.sx * 100); $('objSY').value = Math.round(o.sy * 100); $('objSZ').value = Math.round(o.sz * 100);
+  const f = objFootprint(o), h = (() => { const b = new THREE.Box3(); objParts(o).forEach(p => { p.geom.computeBoundingBox(); b.union(p.geom.boundingBox); }); return (b.max.z - b.min.z) * o.sz; })();
+  $('objSize').textContent = `${(f.max.x - f.min.x).toFixed(1)} × ${(f.max.y - f.min.y).toFixed(1)} × ${h.toFixed(1)} mm`;
+}
+const targets = () => (selObj ? [selObj] : objects.slice());
+function changed3d() { placeAll(); clearPreview(); renderObj(); }
+$('objX').addEventListener('change', () => { if (selObj) { selObj.x = +$('objX').value || 0; changed3d(); } });
+$('objY').addEventListener('change', () => { if (selObj) { selObj.y = +$('objY').value || 0; changed3d(); } });
+$('objRot').addEventListener('change', () => { if (selObj) { selObj.rotZ = (+$('objRot').value || 0) * Math.PI / 180; changed3d(); } });
+['objSX', 'objSY', 'objSZ'].forEach((id, k) => $(id).addEventListener('change', () => {
+  if (!selObj) return;
+  const v = Math.max(1, +$(id).value || 100) / 100;
+  if ($('objLock').checked) { selObj.sx = selObj.sy = selObj.sz = v; }
+  else selObj[['sx', 'sy', 'sz'][k]] = v;
+  changed3d();
+}));
+$('objCenter').addEventListener('click', () => { if (!selObj) return; const B = bedSize(); selObj.x = B.x / 2; selObj.y = B.y / 2; changed3d(); });
+$('objDrop').addEventListener('click', () => select(null));
+$('objDel').addEventListener('click', () => {
+  if (!selObj) return;
+  objParts(selObj).forEach(p => partsGroup.remove(p.mesh));
+  parts = parts.filter(p => p.obj !== selObj); objects = objects.filter(o => o !== selObj); selObj = null;
+  placeAll(); clearPreview(); renderParts(); renderObj();
+});
+function cloneObject(o) {
+  const c = Object.assign({}, o, { id: ++objSeq, origin: Object.assign({}, o.origin) });
+  objects.push(c);
+  objParts(o).forEach(p => {
+    const mesh = new THREE.Mesh(new THREE.BufferGeometry(), partMaterial(p.slot));
+    partsGroup.add(mesh);
+    parts.push({ name: p.name, geom: p.geom.clone(), slot: p.slot, mesh, flowMul: p.flowMul, obj: c });
+  });
+  return c;
+}
+$('objCopy').addEventListener('click', async () => {
+  if (!selObj) return;
+  const n = await dialog('Kopya çoğalt', '<label class="hint">Kaç kopya eklensin?</label><input type="number" id="copyN" min="1" max="50" step="1" value="1">',
+    [[null, 'Vazgeç'], [() => Math.max(1, Math.min(50, Math.round(+$('copyN').value || 1))), 'Ekle', 'primary']]);
+  if (!n) return;
+  let placed = 0;
+  for (let i = 0; i < n; i++) { const c = cloneObject(selObj); if (placeFree(c)) placed++; c.name = selObj.name + ' (' + (i + 2) + ')'; }
+  placeAll(); clearPreview(); renderParts(); renderObj(); focusModels();
+  toast(placed === n ? `${n} kopya eklendi.` : `${n} kopya eklendi; ${n - placed} tanesi için boş yer bulunamadı (kırmızı).`, placed !== n);
+});
+$('objCut').addEventListener('click', async () => {
+  if (!selObj) return;
+  const b = new THREE.Box3(); objParts(selObj).forEach(p => { p.geom.computeBoundingBox(); b.union(p.geom.boundingBox); });
+  const H = (b.max.z - b.min.z) * selObj.sz;
+  const zc = await dialog('Nesneyi kes', `<label class="hint">Tabladan kesme yüksekliği (0–${H.toFixed(1)} mm). Kesik yüzler kapatılır, üst parça kesik yüzü tablaya gelecek şekilde yanına konur.</label><input type="number" id="cutZ" step="0.5" value="${(H / 2).toFixed(1)}">`,
+    [[null, 'Vazgeç'], [() => { const v = +$('cutZ').value; return v > 0.2 && v < H - 0.2 ? v : null; }, 'Kes', 'primary']]);
+  if (!zc) return;
+  cutObject(selObj, zc);
+});
+// Nesneyi z = zc düzleminden ikiye böl (kesik yüzler kapatılır)
+function cutObject(o, zc) {
+  const lowerList = [], upperList = [];
+  objParts(o).forEach(p => {
+    const g = p.geom.clone(); g.scale(o.sx, o.sy, o.sz); g.rotateZ(o.rotZ);
+    const r = cutMesh(g.attributes.position.array, zc);
+    if (r.lower.length) lowerList.push({ name: p.name, positions: r.lower, slot: p.slot, flowMul: p.flowMul });
+    if (r.upper.length) upperList.push({ name: p.name, positions: r.upper, slot: p.slot, flowMul: p.flowMul });
+  });
+  const ox = o.x, oy = o.y, name = o.name;
+  objParts(o).forEach(p => partsGroup.remove(p.mesh));
+  parts = parts.filter(p => p.obj !== o); objects = objects.filter(q => q !== o); selObj = null;
+  if (lowerList.length) { addParts(lowerList, false, true, true); const lo = objects[objects.length - 1]; lo.name = name + ' (alt)'; lo.x = ox; lo.y = oy; }
+  if (upperList.length) {
+    upperList.forEach(u => { for (let i = 2; i < u.positions.length; i += 3) u.positions[i] -= zc; });
+    addParts(upperList, false, true, true); const up = objects[objects.length - 1]; up.name = name + ' (üst)'; placeFree(up);
+  }
+  placeAll(); clearPreview(); renderParts(); renderObj(); focusModels();
+  toast('Nesne ikiye kesildi.');
+}
+function cutMesh(a, zc) {
+  const lower = [], upper = [], segs = [];
+  const P = (i) => [a[i * 3], a[i * 3 + 1], a[i * 3 + 2]];
+  const lerp = (p, q) => { const t = (zc - p[2]) / (q[2] - p[2]); return [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t, zc]; };
+  for (let t = 0; t < a.length / 9; t++) {
+    const v = [P(t * 3), P(t * 3 + 1), P(t * 3 + 2)], up = v.map(p => p[2] >= zc), n = up.filter(Boolean).length;
+    if (n === 3) { upper.push(...v[0], ...v[1], ...v[2]); continue; }
+    if (n === 0) { lower.push(...v[0], ...v[1], ...v[2]); continue; }
+    // yalnız kalan köşeyi başa al (sarım sırası korunur)
+    const lone = n === 1 ? up.indexOf(true) : up.indexOf(false);
+    const A = v[lone], Bv = v[(lone + 1) % 3], C = v[(lone + 2) % 3];
+    const Pp = lerp(A, Bv), Q = lerp(A, C);
+    const tip = [A, Pp, Q], quad = [[Pp, Bv, C], [Pp, C, Q]];
+    const tipSide = n === 1 ? upper : lower, quadSide = n === 1 ? lower : upper;
+    tipSide.push(...tip[0], ...tip[1], ...tip[2]);
+    quad.forEach(tr => quadSide.push(...tr[0], ...tr[1], ...tr[2]));
+    segs.push([Pp, Q]);
+  }
+  // kesit halkaları -> kapak üçgenleri
+  const key = (p) => Math.round(p[0] * 1e4) + ',' + Math.round(p[1] * 1e4);
+  const adj = new Map();
+  segs.forEach((s2, i) => { [key(s2[0]), key(s2[1])].forEach(k => { if (!adj.has(k)) adj.set(k, []); adj.get(k).push(i); }); });
+  const used = new Uint8Array(segs.length), loops = [];
+  for (let i = 0; i < segs.length; i++) {
+    if (used[i]) continue;
+    used[i] = 1;
+    const loop = [segs[i][0], segs[i][1]];
+    let cur = key(segs[i][1]); const start = key(segs[i][0]);
+    for (let g = 0; g < 1e6 && cur !== start; g++) {
+      const nx = (adj.get(cur) || []).find(j => !used[j]);
+      if (nx === undefined) break;
+      used[nx] = 1;
+      const s2 = segs[nx], other = key(s2[0]) === cur ? s2[1] : s2[0];
+      loop.push(other); cur = key(other);
+    }
+    if (loop.length >= 4) { loop.pop(); loops.push(loop.map(p => new THREE.Vector2(p[0], p[1]))); }
+  }
+  // iç içelik: bir halka kaç halkanın içinde? çift = dış kontur, tek = delik
+  const inside = (pt, poly) => { let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) if (((poly[i].y > pt.y) !== (poly[j].y > pt.y)) && pt.x < (poly[j].x - poly[i].x) * (pt.y - poly[i].y) / (poly[j].y - poly[i].y) + poly[i].x) c = !c; return c; };
+  const depth = loops.map((l, i) => loops.reduce((d, m, j) => d + (i !== j && inside(l[0], m) ? 1 : 0), 0));
+  loops.forEach((outer, i) => {
+    if (depth[i] % 2) return;
+    const holes = loops.filter((h, j) => depth[j] === depth[i] + 1 && inside(h[0], outer));
+    let o2 = outer; if (THREE.ShapeUtils.isClockWise(o2)) o2 = o2.slice().reverse();
+    const hs = holes.map(h => THREE.ShapeUtils.isClockWise(h) ? h : h.slice().reverse());
+    let faces = [];
+    try { faces = THREE.ShapeUtils.triangulateShape(o2, hs); } catch (e) { faces = []; }
+    const verts = o2.concat(...hs);
+    faces.forEach(f => {
+      const [p0, p1, p2] = f.map(k => verts[k]);
+      lower.push(p0.x, p0.y, zc, p1.x, p1.y, zc, p2.x, p2.y, zc);       // alt parçanın üst kapağı (yukarı bakar)
+      upper.push(p0.x, p0.y, zc, p2.x, p2.y, zc, p1.x, p1.y, zc);       // üst parçanın alt kapağı (aşağı bakar)
+    });
+  });
+  return { lower: new Float32Array(lower), upper: new Float32Array(upper) };
+}
+
+// ---------------- tablada seçme ve sürükleme (fare ve dokunmatik)
+const picker = new THREE.Raycaster(), ndc = new THREE.Vector2(), bedPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+let drag = null, tap = null;
+function setNdc(e) { const r = renderer.domElement.getBoundingClientRect(); ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1); }
+function bedPoint(e) { setNdc(e); picker.setFromCamera(ndc, camera); const p = new THREE.Vector3(); return picker.ray.intersectPlane(bedPlane, p) ? p : null; }
+wrap.addEventListener('pointerdown', (e) => {
+  if (e.target !== renderer.domElement || !parts.length || !partsGroup.visible || e.button > 0) return;
+  setNdc(e); picker.setFromCamera(ndc, camera);
+  const hit = picker.intersectObjects(parts.map(p => p.mesh), false)[0];
+  if (!hit) { tap = { x: e.clientX, y: e.clientY }; return; }
+  const part = parts.find(p => p.mesh === hit.object), o = part.obj, bp = bedPoint(e);
+  if (selObj !== o) select(o);
+  drag = { o, start: bp, ox: o.x, oy: o.y, moved: false, id: e.pointerId, ox0: () => drag.ox, oy0: () => drag.oy };
+  renderer.domElement.setPointerCapture(e.pointerId);
+  e.stopPropagation(); e.preventDefault(); // görünümü döndürme
+}, true);
+wrap.addEventListener('pointermove', (e) => {
+  if (!drag || e.pointerId !== drag.id) return;
+  const bp = bedPoint(e); if (!bp || !drag.start) return;
+  const dx = bp.x - drag.start.x, dy = bp.y - drag.start.y;
+  if (!drag.moved && Math.hypot(dx, dy) < 0.5) return;
+  drag.moved = true;
+  drag.o.x = drag.ox + dx; drag.o.y = drag.oy + dy;
+  objParts(drag.o).forEach(p => p.mesh.position.set(drag.o.x - drag.ox0(), drag.o.y - drag.oy0(), 0));
+  e.stopPropagation();
+}, true);
+wrap.addEventListener('pointerup', (e) => {
+  if (drag && e.pointerId === drag.id) {
+    if (drag.moved) { clearPreview(); placeAll(); renderObj(); }
+    drag = null; e.stopPropagation(); return;
+  }
+  if (tap && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) < 6 && selObj) select(null);
+  tap = null;
+}, true);
+
+// ---------------- dönüştürme (seçili nesne, yoksa hepsi)
+function rotateObjects(m) {
+  targets().forEach(o => { objParts(o).forEach(p => p.geom.applyMatrix4(m)); normalizeObject(o); });
+  changed3d();
 }
 document.querySelectorAll('[data-rot]').forEach(b => b.addEventListener('click', () => {
-  const m = new THREE.Matrix4(), a = b.dataset.rot;
-  if (a === 'x') m.makeRotationX(Math.PI / 2); else if (a === 'y') m.makeRotationY(Math.PI / 2); else m.makeRotationZ(Math.PI / 2);
-  transformAll(m);
+  const a = b.dataset.rot;
+  if (a === 'z') { targets().forEach(o => { o.rotZ += Math.PI / 2; }); changed3d(); return; }
+  const m = new THREE.Matrix4();
+  if (a === 'x') m.makeRotationX(Math.PI / 2); else m.makeRotationY(Math.PI / 2);
+  rotateObjects(m);
 }));
-$('scale').addEventListener('change', () => { placeAll(); clearPreview(); });
+$('scale').addEventListener('change', () => {
+  const v = Math.max(1, +$('scale').value || 100) / 100;
+  targets().forEach(o => { o.sx = o.sy = o.sz = v; });
+  changed3d();
+});
 $('layflat').addEventListener('click', () => {
   if (!parts.length) return;
-  const acc = new Map();
-  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), n = new THREE.Vector3();
-  parts.forEach(pt => {
-    const p = pt.geom.attributes.position.array;
-    for (let i = 0; i < p.length; i += 9) {
-      a.set(p[i], p[i + 1], p[i + 2]); b.set(p[i + 3], p[i + 4], p[i + 5]); c.set(p[i + 6], p[i + 7], p[i + 8]);
-      n.subVectors(b, a).cross(c.clone().sub(a));
-      const area = n.length() / 2; if (area < 1e-9) continue;
-      n.normalize();
-      const key = `${Math.round(n.x * 50)},${Math.round(n.y * 50)},${Math.round(n.z * 50)}`;
-      const e = acc.get(key) || { area: 0, n: new THREE.Vector3() };
-      e.area += area; e.n.addScaledVector(n, area); acc.set(key, e);
-    }
+  targets().forEach(o => {
+    const acc = new Map();
+    const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), n = new THREE.Vector3();
+    objParts(o).forEach(pt => {
+      const p = pt.geom.attributes.position.array;
+      for (let i = 0; i < p.length; i += 9) {
+        a.set(p[i], p[i + 1], p[i + 2]); b.set(p[i + 3], p[i + 4], p[i + 5]); c.set(p[i + 6], p[i + 7], p[i + 8]);
+        n.subVectors(b, a).cross(c.clone().sub(a));
+        const area = n.length() / 2; if (area < 1e-9) continue;
+        n.normalize();
+        const key = `${Math.round(n.x * 50)},${Math.round(n.y * 50)},${Math.round(n.z * 50)}`;
+        const e = acc.get(key) || { area: 0, n: new THREE.Vector3() };
+        e.area += area; e.n.addScaledVector(n, area); acc.set(key, e);
+      }
+    });
+    let best = null;
+    acc.forEach(e => { if (!best || e.area > best.area) best = e; });
+    if (!best) return;
+    const q = new THREE.Quaternion().setFromUnitVectors(best.n.clone().normalize(), new THREE.Vector3(0, 0, -1));
+    const m = new THREE.Matrix4().makeRotationFromQuaternion(q);
+    objParts(o).forEach(p => p.geom.applyMatrix4(m)); normalizeObject(o);
   });
-  let best = null;
-  acc.forEach(e => { if (!best || e.area > best.area) best = e; });
-  if (!best) return;
-  const q = new THREE.Quaternion().setFromUnitVectors(best.n.clone().normalize(), new THREE.Vector3(0, 0, -1));
-  transformAll(new THREE.Matrix4().makeRotationFromQuaternion(q));
+  changed3d();
   toast('En geniş yüzey tablaya yatırıldı.');
 });
 
-// Birbirine değmeyen gövdeleri ayrı parçalara böl
+// Birbirine değmeyen gövdeleri aynı nesne içinde ayrı parçalara böl (çok renk için)
 $('split').addEventListener('click', () => {
   if (!parts.length) return;
-  const out = [];
+  let made = 0;
+  const keep = [];
   parts.forEach(p => {
+    if (selObj && p.obj !== selObj) { keep.push(p); return; }
     const pos = p.geom.attributes.position.array;
     const nT = pos.length / 9;
     const key = (i) => `${Math.round(pos[i * 3] * 1e4)},${Math.round(pos[i * 3 + 1] * 1e4)},${Math.round(pos[i * 3 + 2] * 1e4)}`;
@@ -613,36 +882,39 @@ $('split').addEventListener('click', () => {
     for (let t = 0; t < nT; t++) { const r0 = find(idx[t * 3]); parent[find(idx[t * 3 + 1])] = r0; parent[find(idx[t * 3 + 2])] = find(idx[t * 3]); }
     const groups = new Map();
     for (let t = 0; t < nT; t++) { const r = find(idx[t * 3]); if (!groups.has(r)) groups.set(r, []); groups.get(r).push(t); }
-    if (groups.size === 1) { out.push({ name: p.name, positions: pos, slot: p.slot }); return; }
+    if (groups.size === 1) { keep.push(p); return; }
+    partsGroup.remove(p.mesh);
     let k = 1;
     [...groups.values()].sort((A, B) => B.length - A.length).forEach(ts => {
       const arr = new Float32Array(ts.length * 9);
       ts.forEach((t, j) => arr.set(pos.subarray(t * 9, t * 9 + 9), j * 9));
-      out.push({ name: `${p.name} #${k++}`, positions: arr, slot: p.slot });
+      const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+      const mesh = new THREE.Mesh(new THREE.BufferGeometry(), partMaterial(p.slot)); partsGroup.add(mesh);
+      keep.push({ name: `${p.name} #${k++}`, geom: g, slot: p.slot, mesh, flowMul: p.flowMul, obj: p.obj });
+      made++;
     });
   });
-  const before = parts.length;
-  const keepScale = $('scale').value;
-  addParts(out, true);
-  $('scale').value = keepScale; placeAll();
-  toast(out.length > before ? `${out.length} parçaya ayrıldı. Her parçaya yuva atayabilirsiniz.` : 'Ayrılacak ayrı gövde bulunamadı.');
+  const before = parts.length; parts = keep;
+  placeAll(); clearPreview(); renderParts();
+  toast(parts.length > before ? `${parts.length} parçaya ayrıldı. Her parçaya yuva atayabilirsiniz.` : 'Ayrılacak ayrı gövde bulunamadı.');
+  void made;
 });
 
-// Parçaları tablaya yan yana diz
+// Nesneleri tablaya yan yana diz
 $('arrange').addEventListener('click', () => {
-  if (parts.length < 2) return;
-  const s = (parseFloat($('scale').value) || 100) / 100, gap = 8 / s, B = bedSize();
-  const items = parts.map(p => { p.geom.computeBoundingBox(); return { p, b: p.geom.boundingBox.clone() }; })
-    .sort((a, b) => (b.b.max.y - b.b.min.y) - (a.b.max.y - a.b.min.y));
-  let x = 0, y = 0, rowH = 0;
-  const maxW = (B.x - 20) / s;
-  items.forEach(({ p, b }) => {
-    const w = b.max.x - b.min.x, h = b.max.y - b.min.y;
-    if (x > 0 && x + w > maxW) { x = 0; y += rowH + gap; rowH = 0; }
-    p.geom.translate(x - b.min.x, y - b.min.y, -b.min.z);
-    x += w + gap; rowH = Math.max(rowH, h);
+  if (!objects.length) return;
+  const B = bedSize(), gap = 6;
+  const items = objects.map(o => ({ o, f: objFootprint(o) })).sort((a, b) => (b.f.max.y - b.f.min.y) - (a.f.max.y - a.f.min.y));
+  let x = 0, y = 0, rowH = 0, maxX = 0;
+  items.forEach(it => {
+    const w = it.f.max.x - it.f.min.x, h = it.f.max.y - it.f.min.y;
+    if (x > 0 && x + w > B.x - 10) { x = 0; y += rowH + gap; rowH = 0; }
+    it.o.x = x - it.f.min.x; it.o.y = y - it.f.min.y;
+    x += w + gap; rowH = Math.max(rowH, h); maxX = Math.max(maxX, x - gap);
   });
-  placeAll(); clearPreview();
+  const totalH = y + rowH, dx = (B.x - maxX) / 2, dy = (B.y - totalH) / 2;
+  objects.forEach(o => { o.x += dx; o.y += dy; });
+  changed3d(); focusModels();
 });
 
 // ================================================================= dosya yükleme
@@ -662,7 +934,7 @@ async function readModel(file) {
   if (!g.attributes.position || g.attributes.position.count < 3) throw new Error('boş model');
   return [{ name, positions: new Float32Array(g.attributes.position.array), slot: 0 }];
 }
-async function loadFiles(files, replace) {
+async function loadFiles(files, replace, asObject) {
   files = [...files].filter(Boolean);
   if (!files.length) return;
   try {
@@ -673,7 +945,7 @@ async function loadFiles(files, replace) {
     }
     if (!all.length) return;
     // eklenen STL parçaları boş yuvalara dağıt
-    if (!replace && parts.length) {
+    if (!replace && !asObject && parts.length) {
       const usedSlots = new Set(parts.map(p => p.slot));
       all.forEach(p => { if (p.slot === 0) { for (let k = 0; k < SLOT_COUNT; k++) if (!usedSlots.has(k)) { p.slot = k; usedSlots.add(k); break; } } });
     }
@@ -685,7 +957,7 @@ async function loadFiles(files, replace) {
       if (r.report.changed) { p.positions = r.positions; fixes.push(repairSummary(r.report)); }
       else if (r.report.nonManifold) fixes.push(repairSummary(r.report));
     });
-    addParts(all, replace);
+    addParts(all, replace, false, asObject);
     setView('iso');
     setTab('view');
     if (fixes.length) toast('Model onarıldı: ' + fixes.join('; '));
@@ -694,6 +966,7 @@ async function loadFiles(files, replace) {
 }
 $('file').addEventListener('change', e => { loadFiles(e.target.files, true); e.target.value = ''; });
 $('fileAdd').addEventListener('change', e => { loadFiles(e.target.files, !parts.length); e.target.value = ''; });
+$('fileObj').addEventListener('change', e => { loadFiles(e.target.files, !parts.length, true); e.target.value = ''; });
 ['dragenter', 'dragover'].forEach(t => window.addEventListener(t, e => { e.preventDefault(); $('drop').classList.add('on'); }));
 window.addEventListener('dragleave', e => { if (!e.relatedTarget) $('drop').classList.remove('on'); });
 window.addEventListener('drop', e => { e.preventDefault(); $('drop').classList.remove('on'); loadFiles(e.dataTransfer.files, true); });

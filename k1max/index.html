@@ -20,6 +20,7 @@
 </head>
 <body data-tab="model">
 <input id="file" type="file" accept=".stl,.3mf,model/stl,model/3mf,application/sla,application/vnd.ms-pki.stl,application/octet-stream,application/zip" hidden>
+<input id="fileObj" type="file" accept=".stl,.3mf,model/stl,model/3mf,application/sla,application/vnd.ms-pki.stl,application/octet-stream,application/zip" multiple hidden>
 <input id="fileAdd" type="file" accept=".stl,.3mf,model/stl,model/3mf,application/sla,application/vnd.ms-pki.stl,application/octet-stream,application/zip" multiple hidden>
 <input id="importProfile" type="file" accept=".json,application/json" hidden>
 
@@ -64,7 +65,8 @@
         <div id="partList" class="parts"></div>
         <div class="btn-row">
           <label class="btn small" for="file">Aç</label>
-          <label class="btn small" for="fileAdd">Parça ekle</label>
+          <label class="btn small" for="fileObj" title="Yeni bir nesne olarak tablaya ekler">Nesne ekle</label>
+          <label class="btn small" for="fileAdd" title="Seçili nesneye parça ekler (çok renkli modeller için, koordinatlar korunur)">Parça ekle</label>
           <button class="btn small" id="split" title="Birbirine değmeyen gövdeleri ayrı parçalara böler">Parçalara ayır</button>
           <button class="btn small" id="arrange" title="Parçaları tablaya yan yana dizer">Yan yana diz</button>
           <button class="btn small" id="demo2">Örnek</button>
@@ -86,8 +88,24 @@
         <div class="btn-row"><button class="btn small primary" id="calibResult" hidden>Sonucu gir</button></div>
       </section>
 
+      <section class="card" id="objCard" hidden>
+        <h2>Seçili nesne: <span id="objName"></span></h2>
+        <div class="row"><span>Konum X / Y</span><span class="inp"><input id="objX" type="number" step="1"><input id="objY" type="number" step="1"><em>mm</em></span></div>
+        <div class="row"><span>Döndür (Z)</span><span class="inp"><input id="objRot" type="number" step="5"><em>°</em></span></div>
+        <div class="row"><span>Ölçek X / Y / Z</span><span class="inp tri"><input id="objSX" type="number" step="1" min="1"><input id="objSY" type="number" step="1" min="1"><input id="objSZ" type="number" step="1" min="1"><em>%</em></span></div>
+        <label class="row"><span>Orantılı ölçek</span><input id="objLock" type="checkbox" class="toggle" checked></label>
+        <p class="hint" id="objSize"></p>
+        <div class="btn-row">
+          <button class="btn small" id="objCopy">Kopya çoğalt</button>
+          <button class="btn small" id="objCut">Kes</button>
+          <button class="btn small" id="objCenter">Ortala</button>
+          <button class="btn small" id="objDrop">Seçimi kaldır</button>
+          <button class="btn small danger" id="objDel">Sil</button>
+        </div>
+      </section>
+
       <section class="card">
-        <h2>Dönüştür</h2>
+        <h2>Dönüştür <small class="hint" id="xfTarget">(tüm nesneler)</small></h2>
         <label class="row"><span>Ölçek</span><span class="inp"><input id="scale" type="number" value="100" min="1" max="2000" step="1"><em>%</em></span></label>
         <div class="btn-row">
           <button class="btn small" data-rot="x">X 90°</button>
@@ -203,6 +221,7 @@
         <select id="colorBy" class="mini" hidden><option value="type">Özellik</option><option value="slot">Filament</option></select>
         <label class="chk"><input type="checkbox" id="showModel" checked> Model</label>
       </div>
+      <div class="edithint" id="editHint" hidden>Nesneye dokunarak seçin, sürükleyerek tablada taşıyın.</div>
     </div>
     <footer class="layerbar" id="layerbar" hidden>
       <label>Katman <b id="layerNum">0</b> / <span id="layerMax">0</span> · Z <b id="layerZ">0</b> mm</label>
