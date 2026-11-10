@@ -39,7 +39,7 @@ function toBlob(text, id) {
 }
 
 // ================================================================= durum ve profiller
-const APP_VERSION = '2.10';
+const APP_VERSION = '2.11';
 let state = null;
 state = loadState();
 let viewRadius = 480;
@@ -1347,7 +1347,7 @@ function onResult(res) {
   $('stats').innerHTML = `Süre: <b>${fmtTime(st.time)}</b> · Filament: <b>${(st.filamentMm / 1000).toFixed(2)} m</b> (<b>${st.grams.toFixed(1)} g</b>)` +
     (st.cost > 0 ? ` · Maliyet: <b>${st.cost.toFixed(2)} ₺</b>` : '') +
     (multi ? ` · Renk değişimi: <b>${st.toolChanges}</b>` : '') + per +
-    ` · Katman: <b>${st.layers}</b>` + (st.ms ? ` · ${(st.ms / 1000).toFixed(1)} sn` : '');
+    ` · Katman: <b>${st.layers}</b>` + (res.adaptive && res.layerH ? ` (uyarlanabilir ${Math.min(...res.layerH.slice(1)).toFixed(2)}–${Math.max(...res.layerH.slice(1)).toFixed(2)} mm)` : '') + (st.ms ? ` · ${(st.ms / 1000).toFixed(1)} sn` : '');
   $('sendHint').textContent = `${result.name} hazır (${fmtTime(st.time)}).`;
 }
 
@@ -1421,7 +1421,7 @@ function updateLayer(keepMove) {
     U.trMesh.geometry.setDrawRange(t0 * 2, (t1 - t0) * 2);
   }
   $('layerNum').textContent = li + 1;
-  $('layerZ').textContent = result.layerZ[li].toFixed(2);
+  $('layerZ').textContent = result.layerZ[li].toFixed(2) + (result.adaptive && result.layerH ? ` (${result.layerH[li].toFixed(2)})` : '');
   $('moveNum').textContent = m;
   // kafa konumu ve hareket bilgisi
   if (!head) head = makeHead();

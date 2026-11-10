@@ -180,6 +180,12 @@ export const PROCESS_SCHEMA = [
     { k: 'layerHeight', l: 'Katman yüksekliği', u: 'mm', t: 'n', min: 0.04, max: 0.32, s: 0.01 },
     { k: 'firstLayerHeight', l: 'İlk katman yüksekliği', u: 'mm', t: 'n', min: 0.1, max: 0.35, s: 0.01 },
   ]},
+  { g: 'Uyarlanabilir katman', sec: 'Kalite', items: [
+    { k: 'adaptiveLayers', l: 'Uyarlanabilir katman yüksekliği', t: 'b', tip: 'Dik duvarlarda kalın, eğik ve kavisli yüzeylerde ince katman: aynı görünüşte daha kısa süre ya da aynı sürede daha pürüzsüz yüzey. Katman yüksekliği ayarı yerine aşağıdaki aralık kullanılır.' },
+    { k: 'adaptiveMinH', l: 'En ince katman', u: 'mm', t: 'n', min: 0.04, max: 0.3, s: 0.01 },
+    { k: 'adaptiveMaxH', l: 'En kalın katman', u: 'mm', t: 'n', min: 0.08, max: 0.32, s: 0.01, tip: '0.4 mm nozulda 0.28–0.30 mm üstüne çıkmayın.' },
+    { k: 'adaptiveQuality', l: 'Yüzey kalitesi', u: '%', t: 'n', min: 0, max: 100, s: 5, tip: '%0: en hızlı (eğimde de kalın katman), %100: en pürüzsüz (eğimde çok ince katman). %50 dengeli.' },
+  ]},
   { g: 'Çizgi genişliği', sec: 'Kalite', items: [
     { k: 'lineWidth', l: 'Varsayılan', u: 'mm', t: 'n', min: 0.2, max: 1.2, s: 0.01 },
     { k: 'firstLayerLineWidth', l: 'İlk katman', u: 'mm', t: 'on', min: 0.2, max: 1.2, s: 0.01, tip: 'Boş = varsayılan.' },
@@ -312,7 +318,7 @@ export const PROCESS_SCHEMA = [
 ];
 
 export const PROCESS_BASE = {
-  layerHeight: 0.2, firstLayerHeight: 0.2,
+  layerHeight: 0.2, firstLayerHeight: 0.2, adaptiveLayers: false, adaptiveMinH: 0.08, adaptiveMaxH: 0.28, adaptiveQuality: 50,
   lineWidth: 0.42, firstLayerLineWidth: 0.5, outerWallLineWidth: 0.42, innerWallLineWidth: 0.45, topLineWidth: 0.42,
   solidLineWidth: 0.42, sparseLineWidth: 0.45, supportLineWidth: 0.42,
   seam: 'corner', seamGap: 10, scarfSeam: 'none', scarfLength: 10, scarfStartHeight: 0,

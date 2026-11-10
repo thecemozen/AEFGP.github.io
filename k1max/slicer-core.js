@@ -670,6 +670,63 @@
     return layers;
   }
 
+  // Uyarlanabilir katman yüksekliği: eğik/kavisli yüzeylerde ince, dik duvarlarda kalın katman.
+  // Merdiven (cusp) yüksekliği c = h·|nz| sınırı → h = c / |nz|. Düz (yatay) yüzler sınırlamaz (üst/alt katmanlar halleder).
+  function makeAdaptiveLayers(S, parts, maxZ) {
+    var hMin = Math.max(0.04, Math.min(S.adaptiveMinH, S.adaptiveMaxH)), hMax = Math.max(hMin, S.adaptiveMaxH);
+    var q = Math.max(0, Math.min(100, S.adaptiveQuality)) / 100;
+    var cusp = 0.22 - 0.16 * q; // %0 → 0.22 mm (hızlı), %50 → 0.14 (0.20 mm sabit katmanın 45°'deki basamağı), %100 → 0.06
+    var tris = [];
+    parts.forEach(function (p) {
+      var m = p.mesh, v = m.v;
+      for (var t = 0; t < m.nTri; t++) {
+        var a = m.idx[t * 3] * 3, b = m.idx[t * 3 + 1] * 3, c = m.idx[t * 3 + 2] * 3;
+        var ux = v[b] - v[a], uy = v[b + 1] - v[a + 1], uz = v[b + 2] - v[a + 2];
+        var wx = v[c] - v[a], wy = v[c + 1] - v[a + 1], wz = v[c + 2] - v[a + 2];
+        var nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx;
+        var len = Math.sqrt(nx * nx + ny * ny + nz * nz);
+        if (len < 1e-12) continue;
+        var az = Math.abs(nz / len);
+        if (az < 0.02 || az > 0.995) continue; // dik duvar ya da düz yüzey: sınırlamaz
+        var hT = cusp / az;
+        if (hT >= hMax) continue;
+        tris.push({ z0: Math.min(v[a + 2], v[b + 2], v[c + 2]), z1: Math.max(v[a + 2], v[b + 2], v[c + 2]), h: hT });
+      }
+    });
+    tris.sort(function (x, y) { return x.z0 - y.z0; });
+    var hs = [], zs = [], z = S.firstLayerHeight, ti = 0, active = [];
+    while (z + hMin * 0.5 < maxZ && hs.length < 20000) {
+      while (ti < tris.length && tris[ti].z0 <= z + hMax) active.push(tris[ti++]);
+      var h = hMax, keep = [];
+      for (var i = 0; i < active.length; i++) {
+        var tr = active[i];
+        if (tr.z1 < z) continue;
+        keep.push(tr);
+        if (tr.z0 <= z + h && tr.h < h) h = tr.h;
+      }
+      active = keep;
+      h = Math.max(hMin, h);
+      hs.push(h); z += h; zs.push(z);
+    }
+    // yumuşatma: komşu katmanlar arasında ani sıçrama olmasın (en fazla %50 / adım)
+    for (var pass = 0; pass < 2; pass++) {
+      for (i = 1; i < hs.length; i++) hs[i] = Math.min(hs[i], hs[i - 1] * 1.5);
+      for (i = hs.length - 2; i >= 0; i--) hs[i] = Math.min(hs[i], hs[i + 1] * 1.5);
+    }
+    var layers = [{ z: S.firstLayerHeight, h: S.firstLayerHeight }];
+    z = S.firstLayerHeight;
+    var top = Math.round(maxZ * 1000) / 1000;
+    for (i = 0; z < top - 1e-6 && i < 40000; i++) {
+      var hh = Math.min(Math.round((hs[Math.min(i, hs.length - 1)] || hMax) * 1000) / 1000, Math.round((top - z) * 1000) / 1000);
+      var prev = layers[layers.length - 1];
+      // son kalan parça çok inceyse bir önceki katmanı kalınlaştır (sığmıyorsa ince katman olarak bas)
+      if (hh < hMin * 0.5 && layers.length > 1 && prev.h + hh <= hMax * 1.15) { prev.h = Math.round((prev.h + hh) * 1000) / 1000; prev.z = top; break; }
+      z = Math.round((z + Math.max(hh, 0.04)) * 1000) / 1000;
+      layers.push({ z: z, h: Math.max(hh, 0.04) });
+    }
+    return layers;
+  }
+
   function sliceParts(parts, layers, progress) {
     var nL = layers.length;
     parts.forEach(function (part, pi) {
@@ -734,22 +791,39 @@
     var topN = Math.max(S.topLayers, Math.ceil(S.topThickness / S.layerHeight - 1e-6));
     var botN = Math.max(S.bottomLayers, Math.ceil(S.bottomThickness / S.layerHeight - 1e-6));
     if (S.spiralVase) topN = 0;
+    var adaptive = !!S.adaptiveActive;
+    // değişken katmanda kabuk, sabit katmandakiyle aynı fiziksel kalınlıkta olsun
+    var tT = Math.max(S.topThickness, topN * S.layerHeight * 0.999), bT = Math.max(S.bottomThickness, botN * S.layerHeight * 0.999);
+    // değişken katmanlarda: istenen kalınlığa ulaşmak için gereken katman sayısı (en az katman sayısı ayarı kadar)
+    function nUp(li) {
+      if (!adaptive || topN === 0) return topN;
+      var t = 0, k = 0;
+      while (li + k + 1 < nL && (k < 2 || t < tT - 1e-6)) { k++; t += layers[li + k].h; }
+      return (k < 2 || t < tT - 1e-6) ? nL : k; // üstte yeterli kalınlık yok: tamamı üst yüzey
+    }
+    function nDown(li) {
+      if (!adaptive || botN === 0) return botN;
+      var t = 0, k = 0;
+      while (li - k - 1 >= 0 && (k < 2 || t < bT - 1e-6)) { k++; t += layers[li - k].h; }
+      return (k < 2 || t < bT - 1e-6) ? li + 1 : k; // altta yeterli kalınlık yok: tamamı alt yüzey
+    }
     for (li = 0; li < nL; li++) {
       var r = R[li];
       if (!r.fill.length) { r.solid = []; r.sparse = []; r.top = []; r.bridge = []; continue; }
       var fill = r.fill, top = [], bottom = [];
       if (S.spiralVase && li >= botN) { r.solid = []; r.sparse = []; r.top = []; r.bridge = []; continue; }
+      var tN = nUp(li), bN = nDown(li);
       if (topN > 0) {
-        if (li + topN >= nL) top = fill; else {
+        if (li + tN >= nL) top = fill; else {
           var acc = fill;
-          for (var k1 = 1; k1 <= topN && acc.length; k1++) acc = intersect(acc, R[li + k1].ref);
+          for (var k1 = 1; k1 <= tN && acc.length; k1++) acc = intersect(acc, R[li + k1].ref);
           top = difference(fill, acc);
         }
       }
       if (botN > 0) {
-        if (li < botN) bottom = fill; else {
+        if (li < bN) bottom = fill; else {
           var acc2 = fill;
-          for (var k2 = 1; k2 <= botN && acc2.length; k2++) acc2 = intersect(acc2, R[li - k2].ref);
+          for (var k2 = 1; k2 <= bN && acc2.length; k2++) acc2 = intersect(acc2, R[li - k2].ref);
           bottom = difference(fill, acc2);
         }
       }
@@ -785,13 +859,12 @@
     if (!S.supportEnable || nL < 3) return { sup: sup, iface: iface };
     var h = S.layerHeight;
     var ang = Math.max(1, Math.min(89, S.supportAngle)) * Math.PI / 180;
-    var allow = h / Math.tan(ang);
     var gapTop = Math.max(0, Math.round(S.supportTopZ / h));
     var gapBot = Math.max(0, Math.round(S.supportBottomZ / h));
     var xy = S.supportXY;
     var ov = [[]];
     for (var li = 1; li < nL; li++) {
-      var o = difference(U[li], offset(U[li - 1], allow, false));
+      var o = difference(U[li], offset(U[li - 1], layers[li].h / Math.tan(ang), false)); // değişken katmanda katmanın kendi yüksekliği
       ov.push(opening(o, S.W.support * 1.5));
     }
     var P = [];
@@ -1325,7 +1398,7 @@
       function emitPart(p) {
         var r = p.regions[li];
         partFlow = p.flowMul || 1; // akış kalibrasyonu: parça başına akış çarpanı
-        var N = Math.max(1, Math.min(4, S.infillEvery | 0));
+        var N = S.adaptiveActive ? 1 : Math.max(1, Math.min(4, S.infillEvery | 0));
         var combo = null;
         if (N > 1 && li > 0) {
           var gs = 1 + Math.floor((li - 1) / N) * N, ge = Math.min(nL - 1, gs + N - 1);
@@ -1611,7 +1684,7 @@
     // Başlık bloğu: Moonraker/Fluidd dilimleyiciyi "; generated by AD SÜRÜM on TARİH at SAAT" satırından tanır
     var now = new Date(), p2 = function (n) { return (n < 10 ? '0' : '') + n; };
     header.push('; HEADER_BLOCK_START');
-    header.push('; generated by K1MaxDilimleyici 2.10 on ' + now.getFullYear() + '-' + p2(now.getMonth() + 1) + '-' + p2(now.getDate()) +
+    header.push('; generated by K1MaxDilimleyici 2.11 on ' + now.getFullYear() + '-' + p2(now.getMonth() + 1) + '-' + p2(now.getDate()) +
       ' at ' + p2(now.getHours()) + ':' + p2(now.getMinutes()) + ':' + p2(now.getSeconds()));
     header.push('; total layer number: ' + nL);
     header.push('; HEADER_BLOCK_END', '');
@@ -1650,6 +1723,7 @@
       preview: new Float32Array(preview),
       layerIndex: layerIndex,
       layerZ: layers.map(function (l) { return l.z; }),
+      layerH: layers.map(function (l) { return l.h; }), adaptive: !!S.adaptiveActive,
       stats: { time: timeS, filamentMm: totMm, grams: totG, cost: totCost, layers: nL, toolChanges: stats.toolChanges, perSlot: perSlot, retracts: stats.retracts, combed: stats.combed,
         timeByType: Object.keys(stats.byType).reduce(function (o, k) { o[k] = Math.round(stats.byType[k] * S.timeFactor * 10) / 10; return o; }, {}) }
     };
@@ -1672,7 +1746,8 @@
     if (!parts.length) throw new Error('Dilimlenecek model yok.');
     if (S.spiralVase && parts.length > 1) throw new Error('Vazo modu yalnızca tek parçalı modellerde çalışır.');
     var maxZ = Math.max.apply(null, parts.map(function (p) { return p.mesh.maxZ; }));
-    var layers = makeLayers(S, maxZ);
+    S.adaptiveActive = !!S.adaptiveLayers && !S.spiralVase && !job.calib;
+    var layers = S.adaptiveActive ? makeAdaptiveLayers(S, parts, maxZ) : makeLayers(S, maxZ);
     S.spiralStart = Math.max(S.bottomLayers, 1);
 
     sliceParts(parts, layers, progress);
