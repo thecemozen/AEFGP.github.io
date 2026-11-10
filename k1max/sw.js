@@ -1,7 +1,7 @@
 /* Çevrimdışı çalışma: uygulama dosyalarını ve sabit sürümlü kütüphaneleri önbelleğe alır. */
-const VERSION = 'k1max-v5';
+const VERSION = 'k1max-v6';
 const APP = [
-  './', './index.html', './style.css', './app.js', './presets.js', './slicer-core.js', './slicer-worker.js', './threemf.js', './bed-model.js',
+  './', './index.html', './style.css', './app.js', './presets.js', './slicer-core.js', './slicer-worker.js', './threemf.js', './meshrepair.js', './bed-model.js',
   './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png',
 ];
 const LIBS = [

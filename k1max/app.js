@@ -3,6 +3,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { CATEGORIES, SLOT_COLORS, SLOT_COUNT } from './presets.js';
 import { load3MF } from './threemf.js';
+import { repairMesh, repairSummary } from './meshrepair.js';
 import { K1MAX_BED_STL_B64, K1MAX_BED_TEXTURE_SVG } from './bed-model.js';
 
 const $ = (id) => document.getElementById(id);
@@ -675,9 +676,18 @@ async function loadFiles(files, replace) {
       const usedSlots = new Set(parts.map(p => p.slot));
       all.forEach(p => { if (p.slot === 0) { for (let k = 0; k < SLOT_COUNT; k++) if (!usedSlots.has(k)) { p.slot = k; usedSlots.add(k); break; } } });
     }
+    // bozuk modelleri onar
+    const fixes = [];
+    all.forEach(p => {
+      if (p.positions.length > 9 * 3e6) return; // çok büyük: atla
+      const r = repairMesh(p.positions);
+      if (r.report.changed) { p.positions = r.positions; fixes.push(repairSummary(r.report)); }
+      else if (r.report.nonManifold) fixes.push(repairSummary(r.report));
+    });
     addParts(all, replace);
     setView('iso');
     setTab('view');
+    if (fixes.length) toast('Model onarıldı: ' + fixes.join('; '));
     if (parts.length > 1) toast(`${parts.length} parça yüklendi. Model sekmesinden her parçanın yuvasını seçebilirsiniz.`);
   } catch (e) { toast('Dosya okunamadı: ' + e.message, true); }
 }
