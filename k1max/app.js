@@ -3,6 +3,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { CATEGORIES, SLOT_COLORS, SLOT_COUNT } from './presets.js';
 import { load3MF } from './threemf.js';
+import { writeProject, readProject } from './project3mf.js';
 import { repairMesh, repairSummary } from './meshrepair.js';
 import { K1MAX_BED_STL_B64, K1MAX_BED_TEXTURE_SVG } from './bed-model.js';
 
@@ -38,6 +39,7 @@ function toBlob(text, id) {
 }
 
 // ================================================================= durum ve profiller
+const APP_VERSION = '2.9';
 let state = null;
 state = loadState();
 let viewRadius = 480;
@@ -897,7 +899,6 @@ $('split').addEventListener('click', () => {
   const before = parts.length; parts = keep;
   placeAll(); clearPreview(); renderParts();
   toast(parts.length > before ? `${parts.length} parçaya ayrıldı. Her parçaya yuva atayabilirsiniz.` : 'Ayrılacak ayrı gövde bulunamadı.');
-  void made;
 });
 
 // Nesneleri tablaya yan yana diz
@@ -925,6 +926,8 @@ async function readModel(file) {
   const head = new Uint8Array(buf, 0, Math.min(4, buf.byteLength));
   const isZip = head[0] === 0x50 && head[1] === 0x4b;
   if (/\.3mf$/i.test(file.name) || isZip) {
+    const proj = await readProject(buf).catch(() => null);
+    if (proj) return { project: proj, name };
     const r = await load3MF(buf);
     r.warnings.forEach(w => toast(w, true));
     return r.parts;
@@ -941,7 +944,9 @@ async function loadFiles(files, replace, asObject) {
     let all = [];
     for (const f of files) {
       if (/\.[a-z0-9]{2,5}$/i.test(f.name) && !/\.(stl|3mf)$/i.test(f.name)) { toast('Yalnızca STL ve 3MF dosyaları destekleniyor.', true); continue; }
-      all = all.concat(await readModel(f));
+      const r = await readModel(f);
+      if (r.project) { await loadProject(r.project, r.name, replace || !parts.length); return; }
+      all = all.concat(r);
     }
     if (!all.length) return;
     // eklenen STL parçaları boş yuvalara dağıt
@@ -970,6 +975,59 @@ $('fileObj').addEventListener('change', e => { loadFiles(e.target.files, !parts.
 ['dragenter', 'dragover'].forEach(t => window.addEventListener(t, e => { e.preventDefault(); $('drop').classList.add('on'); }));
 window.addEventListener('dragleave', e => { if (!e.relatedTarget) $('drop').classList.remove('on'); });
 window.addEventListener('drop', e => { e.preventDefault(); $('drop').classList.remove('on'); loadFiles(e.dataTransfer.files, true); });
+
+// ================================================================= proje (3MF)
+async function saveProject() {
+  if (!parts.length) { toast('Kaydedilecek model yok.', true); return; }
+  const live = objects.filter(o => objParts(o).length);
+  const blob = await writeProject({
+    objects: live,
+    parts: parts.map(p => ({ name: p.name, positions: p.geom.attributes.position.array, slot: p.slot, flowMul: p.flowMul, obj: live.indexOf(p.obj) })),
+    settings: { printer: state.printer, process: state.process, slots: state.slots },
+    app: { name: 'K1MaxDilimleyici', version: APP_VERSION },
+  });
+  const base = (live[0].name || 'proje').replace(/[^\w\-çğıöşüÇĞİÖŞÜ ]/g, '_').trim() || 'proje';
+  download(blob, `${base}${live.length > 1 ? '_' + live.length + 'nesne' : ''}_proje.3mf`);
+}
+$('saveProject').addEventListener('click', () => saveProject().catch(e => toast('Proje kaydedilemedi: ' + e.message, true)));
+
+async function loadProject(proj, fileName, replace) {
+  setCalib(null);
+  if (replace) { parts.forEach(p => { partsGroup.remove(p.mesh); p.mesh.geometry.dispose(); }); parts = []; objects = []; selObj = null; }
+  const objs = proj.objects.map(m => {
+    const o = { id: ++objSeq, name: m.name || ('Nesne ' + objSeq), x: +m.x || 0, y: +m.y || 0, rotZ: +m.rotZ || 0, sx: +m.sx || 1, sy: +m.sy || 1, sz: +m.sz || 1,
+      origin: Object.assign({ x: 0, y: 0, z: 0 }, m.origin) };
+    objects.push(o); return o;
+  });
+  proj.parts.forEach(p => {
+    const o = objs[p.obj]; if (!o) return;
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(p.positions, 3));
+    const slot = Math.min(SLOT_COUNT - 1, Math.max(0, p.slot));
+    const mesh = new THREE.Mesh(new THREE.BufferGeometry(), partMaterial(slot)); partsGroup.add(mesh);
+    parts.push({ name: p.name, geom: g, slot, mesh, flowMul: p.flowMul, obj: o });
+  });
+  objects = objects.filter(o => objParts(o).length);
+  if (!replace) objs.forEach(o => placeFree(o));
+  let msg = `Proje açıldı: ${objs.length} nesne, ${proj.parts.length} parça.`;
+  const S = proj.settings;
+  if (S && S.printer && S.process && Array.isArray(S.slots)) {
+    const take = await dialog('Proje ayarları', `<p>Bu proje kendi ayarlarıyla kaydedilmiş:</p><p class="hint">Yazıcı: ${escapeHtml(S.printer.name)}<br>İşlem: ${escapeHtml(S.process.name)}<br>Filament: ${S.slots.map(s => escapeHtml(s.name)).filter((v, i, a) => a.indexOf(v) === i).join(', ')}</p><p>Bu ayarlar da yüklensin mi?</p>`,
+      [[false, 'Yalnızca model'], [true, 'Model + ayarlar', 'primary']]);
+    if (take) {
+      const keep = { hostIp: state.printer.values.hostIp, hostPort: state.printer.values.hostPort };
+      state.printer = JSON.parse(JSON.stringify(S.printer)); state.process = JSON.parse(JSON.stringify(S.process));
+      state.slots = JSON.parse(JSON.stringify(S.slots)).slice(0, SLOT_COUNT);
+      while (state.slots.length < SLOT_COUNT) state.slots.push({ name: 'Genel PLA', color: SLOT_COLORS[state.slots.length], values: null });
+      saveState(); state = loadState();
+      if (keep.hostIp) { state.printer.values.hostIp = keep.hostIp; state.printer.values.hostPort = keep.hostPort; saveState(); }
+      renderAll(); buildBed(); recolorParts();
+      msg += ' Ayarlar da yüklendi.';
+    }
+  }
+  placeAll(); focusModels(); clearPreview(); renderParts(); renderObj();
+  setView('iso'); setTab('view');
+  toast(msg);
+}
 
 // Örnek modeller
 function demoParts(multi) {
@@ -1495,6 +1553,21 @@ function gcodeName() {
 $('download').addEventListener('click', () => { if (result) download(new Blob([result.gcode], { type: 'text/plain' }), result.name); });
 
 function download(blob, name) {
+  if (bridge && !/^(text|application\/json)/.test(blob.type || 'text/plain')) {
+    // ikili dosya (3MF): base64 parçalarıyla aktar
+    if (!bridge.blobAppend64) { toast('Bu uygulama sürümü ikili dosya kaydedemiyor; uygulamayı güncelleyin.', true); return; }
+    blob.arrayBuffer().then(buf => {
+      const u8 = new Uint8Array(buf), CH = 384 * 1024;
+      if (!bridge.blobBegin('bin')) throw new Error('geçici dosya oluşturulamadı');
+      for (let i = 0; i < u8.length; i += CH) {
+        const part = u8.subarray(i, i + CH); let bin = '';
+        for (let j = 0; j < part.length; j += 8192) bin += String.fromCharCode.apply(null, part.subarray(j, j + 8192));
+        if (!bridge.blobAppend64('bin', btoa(bin))) throw new Error('geçici dosyaya yazılamadı');
+      }
+      toast(bridge.saveBlob(name, 'bin'));
+    }).catch(e => toast('Kaydedilemedi: ' + e.message, true));
+    return;
+  }
   if (bridge) {
     blob.text().then(t => {
       try { toast(bridge.blobBegin ? bridge.saveBlob(name, toBlob(t)) : bridge.saveFile(name, t)); }

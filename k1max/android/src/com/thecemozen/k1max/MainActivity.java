@@ -218,6 +218,11 @@ public class MainActivity extends Activity {
             try (FileOutputStream os = new FileOutputStream(blobFile(id), true)) { os.write(chunk.getBytes(StandardCharsets.UTF_8)); return true; }
             catch (Exception e) { return false; }
         }
+        /** İkili veri (3MF proje) için: base64 parçasını çözüp geçici dosyaya ekler. */
+        @JavascriptInterface public boolean blobAppend64(String id, String b64) {
+            try (FileOutputStream os = new FileOutputStream(blobFile(id), true)) { os.write(Base64.decode(b64, Base64.DEFAULT)); return true; }
+            catch (Exception e) { return false; }
+        }
         @JavascriptInterface public String saveBlob(String name, String id) {
             try {
                 Uri uri = writeToDownloads(name, blobFile(id));
@@ -407,7 +412,7 @@ public class MainActivity extends Activity {
     }
 
     private Uri writeToDownloads(String name, File src) throws Exception {
-        String mime = name.endsWith(".json") ? "application/json" : "text/x-gcode";
+        String mime = name.endsWith(".json") ? "application/json" : name.endsWith(".3mf") ? "model/3mf" : "text/x-gcode";
         if (Build.VERSION.SDK_INT >= 29) {
             // MediaStore.Downloads (API 29); derleme API 23'e karşı yapıldığı için yansıma ile
             Uri collection = (Uri) Class.forName("android.provider.MediaStore$Downloads")

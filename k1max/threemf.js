@@ -5,7 +5,7 @@
  */
 
 // ---------------------------------------------------------------- ZIP
-async function unzip(buf) {
+export async function unzip(buf) {
   const dv = new DataView(buf);
   const u8 = new Uint8Array(buf);
   let eocd = -1;
@@ -61,7 +61,7 @@ function mul(a, b) { // önce a, sonra b
 const els = (node, name) => Array.from(node.getElementsByTagNameNS('*', name));
 const attr = (el, name) => el.getAttribute(name) ?? el.getAttributeNS('http://schemas.microsoft.com/3dmanufacturing/production/2015/06', name.replace(/^p:/, ''));
 
-function meshOf(objEl) {
+export function meshOf(objEl) {
   const meshEl = els(objEl, 'mesh')[0];
   if (!meshEl) return null;
   const vs = els(meshEl, 'vertex');
