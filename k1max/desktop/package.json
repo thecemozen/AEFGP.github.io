@@ -1,0 +1,9 @@
+{
+  "name": "k1max-dilimleyici",
+  "productName": "K1 Max Dilimleyici",
+  "version": "2.14.0",
+  "description": "Creality K1 Max (CFS) için dilimleyici",
+  "main": "main.js",
+  "author": "thecemozen",
+  "license": "AGPL-3.0"
+}

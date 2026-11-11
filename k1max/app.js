@@ -1796,7 +1796,7 @@ async function connect(silent) {
   }
   dev.connected = false;
   $('devStatusCard').hidden = true;
-  if (lastErr && lastErr.message === 'cors' && !bridge) {
+  if (lastErr && lastErr.message === 'cors' && !bridge && !window.k1Desktop) {
     $('devHint').innerHTML = 'Yazıcıya ulaşılamadı ya da tarayıcı güvenliği yanıtı okumayı engelledi. Durum bilgisi için Android uygulamasını kullanın. ' +
       'Dosya göndermeyi yine de deneyebilirsiniz (sonucu Fluidd\'den kontrol edin).';
   } else {
@@ -1842,7 +1842,15 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden || !state.printer.values.hostIp) return;
   if (dev.connected) pollStatus(); else connect(true);
 });
-function startPolling() { stopPolling(); dev.timer = setInterval(() => { if (!document.hidden && (document.body.dataset.tab === 'device' || window.innerWidth > 820)) pollStatus(); }, 3000); }
+function startPolling() {
+  stopPolling(); let tick = 0;
+  dev.timer = setInterval(() => {
+    tick++;
+    // masaüstü programı simge durumundayken de (30 sn'de bir) yokla: baskı bitince bildirim gelsin
+    if (document.hidden) { if (window.k1Desktop && tick % 10 === 0) pollStatus(); return; }
+    if (document.body.dataset.tab === 'device' || window.innerWidth > 820) pollStatus();
+  }, 3000);
+}
 function stopPolling() { if (dev.timer) clearInterval(dev.timer); dev.timer = null; }
 // ---------------- baskı bildirimleri
 const NOTIFY_KEY = 'k1max-notify';
@@ -1865,6 +1873,7 @@ function renderNotify() {
   $('notifyOn').checked = notifyOn();
   $('notifyHint').textContent = bridge
     ? (bridge.watchPrint ? 'Baskı başlayınca telefon yazıcıyı dakikada bir yoklar; uygulama kapalı olsa da ilerleme ve sonuç bildirimi gelir (telefon uykudayken aralık uzayabilir).' : 'Bu uygulama sürümü arka plan bildirimini desteklemiyor; uygulamayı güncelleyin.')
+    : window.k1Desktop ? 'Program açıkken (simge durumuna küçültülmüş olsa da) Windows bildirimi gelir. Program kapalıyken bildirim için Android uygulamasını kullanın.'
     : 'Tarayıcıda bildirim yalnızca bu sayfa açıkken gelir. Uygulama kapalıyken bildirim için Android uygulamasını kullanın.';
 }
 $('notifyOn').addEventListener('change', async () => {

@@ -17,6 +17,9 @@ Creality K1 Max için tarayıcıda çalışan basit bir STL → G-code dilimleyi
 
 ## İndir ve kur (internet gerekmez)
 - **Bilgisayar:** [`dist/K1MaxDilimleyici.html`](dist/K1MaxDilimleyici.html) dosyasını indirin, çift tıklayın. Chrome / Edge / Firefox'ta açılır, tamamen çevrimdışı çalışır.
+- **Windows (kurulum):** `desktop/build-win.sh` ile üretilen `K1MaxDilimleyici-Kurulum-<sürüm>.exe` dosyasını çalıştırın.
+  Yönetici izni istemez; Başlat menüsüne ve masaüstüne kısayol ekler, STL/3MF için "Birlikte aç" listesine girer,
+  yazıcıya doğrudan bağlanır. İmzasız olduğu için ilk açılışta SmartScreen uyarısında *Ek bilgi → Yine de çalıştır* deyin.
 - **Android (APK):** [`dist/K1MaxDilimleyici.apk`](dist/K1MaxDilimleyici.apk) dosyasını telefona indirin, açın ve
   *Bilinmeyen kaynaklardan yüklemeye izin ver* deyin. Android 7.0 ve üstü.
   - STL dosyasını uygulamadan **Model → STL Aç** ile seçin ya da dosya yöneticisinde *Birlikte aç → K1 Max Dilimleyici* deyin.
@@ -45,7 +48,7 @@ firmware'i yapar. Firmware sürümünüze göre farklı bir dizi gerekebilir: Cr
 
 ## Sınırlamalar
 - Ağaç (tree) destek, boyama ile renklendirilmiş 3MF, değiştirici hacimler, değişken katman yüksekliği ve duvar kesişimini önleme (avoid crossing walls) yoktur.
-- Bilgisayar sürümü (tek HTML) tarayıcı güvenliği nedeniyle yazıcı durumunu okuyamayabilir; Android uygulamasında bu kısıt yoktur.
+- Bilgisayar sürümü (tek HTML) tarayıcı güvenliği nedeniyle yazıcı durumunu okuyamayabilir; Android ve Windows uygulamalarında bu kısıt yoktur.
 - Süre tahmini yaklaşıktır.
 
 ## Üçüncü taraf dosyalar
