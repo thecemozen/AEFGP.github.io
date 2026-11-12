@@ -64,6 +64,8 @@ export const PRINTER_SCHEMA = [
   ]},
   { g: 'Klipper / Fluidd', items: [
     { k: 'labelObjects', l: 'Nesne etiketle (EXCLUDE_OBJECT)', t: 'b', tip: "Fluidd'de baskı sırasında tek bir parçayı iptal etmeyi sağlar. printer.cfg içinde [exclude_object] bölümü yoksa yazıcı hata verir; emin değilseniz kapalı bırakın." },
+    { k: 'startLineMode', l: 'Başlangıç çizgisi (önizleme)', t: 's', o: { auto: 'Yazıcıdan oku', manual: 'Elle gir', none: 'Gösterme' }, tip: 'Baskı başındaki temizleme çizgisini yazıcının START_PRINT komutu çizer. "Yazıcıdan oku": bağlanınca makro okunur (KAMP uyarlanabilir çizgi ya da makrodaki G1 hareketleri). Creality\'nin kendi çizgisi okunamaz; o zaman "Elle gir" seçin.' },
+    { k: 'startLineManual', l: 'Çizgi (X1,Y1,X2,Y2)', t: 'x', tip: 'Elle girişte: çizginin başlangıç ve bitiş noktası (mm), ör. 5,5,5,150. Yalnızca önizlemede gösterilir; G-code değişmez.' },
     { k: 'thumbnail', l: 'Önizleme resmi ekle', t: 'b', tip: "Fluidd/Mainsail dosya listesinde model resmi gösterilir." },
     { k: 'thumbnailSize', l: 'Resim boyutu', u: 'px', t: 's', o: { 300: '300×300', 200: '200×200', 128: '128×128' }, adv: true },
   ]},
@@ -85,7 +87,7 @@ export const PRINTER_BASE = {
   retractLength: 0.8, retractSpeed: 40, deretractSpeed: 40, zHop: 0.2, retractMinTravel: 1.5, retractOnLayerChange: true, avoidCrossingWalls: true, retractOnlyCrossing: true, combMaxDetour: 2, wipe: true, wipeDistance: 1.5, wipeRetractPart: 70,
   toolChangeLift: 2, toolChangeTime: 45, changeFilamentGcode: CHANGE_GCODE,
   startGcode: START_GCODE, endGcode: END_GCODE, layerChangeGcode: '',
-  labelObjects: false, thumbnail: true, thumbnailSize: 300,
+  labelObjects: false, startLineMode: 'auto', startLineManual: '', startLineInfo: '', thumbnail: true, thumbnailSize: 300,
   hostIp: '', hostPort: 7125, apiKey: '', uploadFolder: '', timeScale: 1, startupTime: 0,
 };
 

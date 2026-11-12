@@ -39,7 +39,8 @@ function toBlob(text, id) {
 }
 
 // ================================================================= durum ve profiller
-const APP_VERSION = '2.17';
+const APP_VERSION = '2.18';
+const DEVICE_KEYS = ['hostIp', 'hostPort', 'apiKey', 'startLineInfo'];
 const FAST_PRESET = 'Hızlı baskı (uyarlanabilir 0.10–0.28)';
 let state = null;
 state = loadState();
@@ -118,7 +119,8 @@ function working(cat) { return cat === 'filament' ? state.slots[state.filSlot] :
 function isModified(cat, w) {
   w = w || working(cat);
   const p = presetValues(cat, w.name);
-  return Object.keys(CATEGORIES[cat].base).some(k => !same(p[k], w.values[k]));
+  // cihaza özgü (bağlantı, yazıcıdan okunan) değerler profili "değiştirilmiş" saymaz
+  return Object.keys(CATEGORIES[cat].base).some(k => !DEVICE_KEYS.includes(k) && !same(p[k], w.values[k]));
 }
 function same(a, b) {
   if ((a === null || a === undefined || a === '') && (b === null || b === undefined || b === '')) return true;
@@ -276,7 +278,7 @@ function settingsChanged(cat) {
   saveState();
   $('modBadge').hidden = !isModified(cat);
   $('pReset').disabled = !isModified(cat);
-  if (cat === 'printer') { syncDeviceFields(); buildBed(); placeAll(); }
+  if (cat === 'printer') { syncDeviceFields(); buildBed(); placeAll(); if (result) { showStartLine(); buildLegend(); } }
   renderQuick();
   invalidate();
   scheduleAnalysis();
@@ -1726,6 +1728,7 @@ function onResult(res) {
   clearPreviewObj();
   preview = buildPreview(res);
   scene.add(preview);
+  showStartLine();
   if (!preview.userData.solid) toast('Model çok büyük; önizleme hafıza için çizgi olarak gösteriliyor.');
   const multi = res.stats.usedSlots && res.stats.usedSlots.length > 1;
   if (multi && state.colorBy !== 'slot') { state.colorBy = 'slot'; saveState(); }
@@ -1775,6 +1778,10 @@ function buildLegend() {
   lg.innerHTML = state.colorBy === 'slot'
     ? [...slots].sort().map(s => `<div><i style="background:${state.slots[s].color}"></i>Yuva ${s + 1}: ${escapeHtml(state.slots[s].name)}</div>`).join('')
     : TYPE_INFO.map((t, i) => present.has(i) && (i !== 5 || state.process.values.previewTravel) ? `<div><i style="background:${hex(t[1])}"></i>${t[0]}</div>` : '').join('');
+  const sl = startLineSegments();
+  if (sl.segs.length) lg.innerHTML += `<div><i style="background:${hex(START_LINE_COLOR)}"></i>Başlangıç çizgisi (yazıcı${sl.note === 'KAMP' ? ', KAMP' : ''})</div>`;
+  if (sl.note === 'KAMP' && !state.printer.values.labelObjects) lg.innerHTML += '<div class="hint" style="max-width:200px">KAMP çizgiyi baskının hemen önüne çeksin istiyorsanız Ayarlar → Yazıcı → Nesne etiketle\'yi açın (yoksa sol alt köşeye çizer).</div>';
+  else if (sl.note === 'creality') lg.innerHTML += '<div class="hint" style="max-width:190px">Başlangıç çizgisini yazıcı çiziyor, yeri okunamadı. Ayarlar → Yazıcı → Başlangıç çizgisi → Elle gir.</div>';
   lg.hidden = false;
 }
 $('colorBy').addEventListener('change', () => { state.colorBy = $('colorBy').value; saveState(); refreshPreviewColors(); });
@@ -1881,7 +1888,7 @@ window.addEventListener('keydown', e => {
   if (e.key === 'ArrowLeft') { stopPlayback(); setMove(+$('move').value - 1); e.preventDefault(); }
 });
 
-function clearPreviewObj() { stopPlayback(); if (head) head.visible = false; if (preview) { scene.remove(preview); preview.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); }); preview = null; } }
+function clearPreviewObj() { stopPlayback(); if (head) head.visible = false; if (startLineObj) { scene.remove(startLineObj); startLineObj = null; } if (preview) { scene.remove(preview); preview.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); }); preview = null; } }
 function clearPreview() {
   clearPreviewObj();
   result = null;
@@ -2064,6 +2071,7 @@ async function connect(silent) {
       $('devStatusCard').hidden = false; $('camCard').hidden = false;
       pollStatus(); startPolling();
       learnFromHistory();
+      detectStartLine();
       updateButtons();
       return true;
     } catch (e) {
@@ -2234,6 +2242,96 @@ async function printerCmd(path, okMsg) {
   } catch (e) { toast('Komut gönderilemedi: ' + e.message, true); }
   setTimeout(pollStatus, 800);
 }
+// ---------------- yazıcının başlangıç (temizleme) çizgisi: START_PRINT makrosundan bul
+// Sonuç yazıcı ayarlarına kaydedilir (bağlantı yokken de önizlemede görünsün).
+async function detectStartLine() {
+  try {
+    const r = await http('GET', dev.base + '/printer/objects/query?configfile=config', { timeout: 8000 });
+    const cfg = ((((json(r) || {}).result || {}).status || {}).configfile || {}).config || {};
+    const macros = {};
+    Object.keys(cfg).forEach(k => { const m = k.match(/^gcode_macro\s+(\S+)$/i); if (m) macros[m[1].toLowerCase()] = cfg[k]; });
+    const start = macros.start_print;
+    if (!start || !start.gcode) return;
+    let info = null;
+    const segs = [], pos = { x: null, y: null, z: 0.3, rel: false };
+    const walk = (name, depth) => {
+      const mac = macros[name]; if (!mac || depth > 4 || info) return;
+      String(mac.gcode || '').split('\n').forEach(line => {
+        if (info) return;
+        const l = line.replace(/;.*$/, '').trim(); if (!l || l.startsWith('{')) return;
+        const cmd = l.split(/\s+/)[0].toUpperCase();
+        if (cmd === 'LINE_PURGE' && macros.line_purge) {
+          const k = macros._kamp_settings || {};
+          const num2 = (v, d) => { const x = parseFloat(v); return isNaN(x) ? d : x; };
+          info = { kind: 'kamp', margin: num2(k.variable_purge_margin, 10), amount: num2(k.variable_purge_amount, 30), height: num2(k.variable_purge_height, 0.8) };
+          return;
+        }
+        if (cmd === 'CX_PRINT_DRAW_ONE_LINE') { if (!segs.length) info = { kind: 'creality' }; return; }
+        if (cmd === 'G90') pos.rel = false; else if (cmd === 'G91') pos.rel = true;
+        if ((cmd === 'G1' || cmd === 'G0') && !/\{/.test(l)) {
+          const g = (c) => { const m = l.match(new RegExp('\\b' + c + '(-?[\\d.]+)', 'i')); return m ? +m[1] : null; };
+          const X = g('X'), Y = g('Y'), Z = g('Z'), E = g('E');
+          const nx = X === null ? pos.x : (pos.rel ? (pos.x || 0) + X : X), ny = Y === null ? pos.y : (pos.rel ? (pos.y || 0) + Y : Y);
+          if (Z !== null) pos.z = pos.rel ? pos.z + Z : Z;
+          if (E !== null && E > 0 && pos.x !== null && nx !== null && (nx !== pos.x || ny !== pos.y)) segs.push([pos.x, pos.y, nx, ny, pos.z]);
+          pos.x = nx; pos.y = ny;
+        }
+        if (/^[A-Z_][A-Z0-9_]*$/.test(cmd) && macros[cmd.toLowerCase()] && cmd !== 'START_PRINT') walk(cmd.toLowerCase(), depth + 1);
+      });
+    };
+    walk('start_print', 0);
+    if (!info && segs.length) info = { kind: 'gcode', segs };
+    if (!info) info = { kind: 'none' };
+    const txt = JSON.stringify(info);
+    if (state.printer.values.startLineInfo !== txt) { state.printer.values.startLineInfo = txt; saveState(); if (result) showStartLine(); }
+  } catch (e) { /* yapılandırma okunamadı: kayıtlı bilgi kullanılır */ }
+}
+// önizlemede gösterilecek çizgi parçaları [[x1,y1,x2,y2,z], ...] ve açıklaması
+function startLineSegments() {
+  const v = state.printer.values, mode = v.startLineMode || 'auto';
+  if (mode === 'none') return { segs: [], note: '' };
+  if (mode === 'manual') {
+    const n = String(v.startLineManual || '').split(/[,;\s]+/).map(parseFloat).filter(x => !isNaN(x));
+    return n.length >= 4 ? { segs: [[n[0], n[1], n[2], n[3], 0.3]], note: 'elle' } : { segs: [], note: '' };
+  }
+  let info = null; try { info = JSON.parse(v.startLineInfo || 'null'); } catch (e) { info = null; }
+  if (!info) return { segs: [], note: 'bilinmiyor' };
+  if (info.kind === 'gcode') return { segs: info.segs, note: 'makro' };
+  if (info.kind === 'kamp') {
+    // KAMP Line_Purge: nesnelerin (EXCLUDE_OBJECT) kapladığı alanın önüne, yoksa sol kenara
+    let xmin = 0, xmax = 0, ymin = 0, ymax = 0;
+    if (state.printer.values.labelObjects && objects.some(o => o.box)) {
+      xmin = Infinity; ymin = Infinity; xmax = -Infinity; ymax = -Infinity;
+      objects.forEach(o => { if (!o.box) return; xmin = Math.min(xmin, o.box.min.x); ymin = Math.min(ymin, o.box.min.y); xmax = Math.max(xmax, o.box.max.x); ymax = Math.max(ymax, o.box.max.y); });
+    }
+    const A = info.amount, detect = xmin + xmax + ymin + ymax;
+    let xc = Math.max((xmax + xmin) / 2 - A / 2, 0), yc = Math.max((ymax + ymin) / 2 - A / 2, 0);
+    if ((xc === 0 && yc === 0) || detect === 0) { xc = 10; yc = 10; }
+    const xo = Math.max(xmin - info.margin, 0), yo = Math.max(ymin - info.margin, 0);
+    const seg = yo > 0 ? [xc, yo, xc + A, yo, info.height] : [xo, yc, xo, yc + A, info.height];
+    return { segs: [seg], note: 'KAMP' };
+  }
+  return { segs: [], note: info.kind === 'creality' ? 'creality' : 'bilinmiyor' };
+}
+let startLineObj = null;
+function showStartLine() {
+  if (startLineObj) { scene.remove(startLineObj); startLineObj.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); }); startLineObj = null; }
+  if (!result) return;
+  const { segs } = startLineSegments();
+  if (!segs.length) return;
+  startLineObj = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({ color: START_LINE_COLOR, roughness: 0.5 });
+  segs.forEach(([x1, y1, x2, y2, z]) => {
+    const len = Math.hypot(x2 - x1, y2 - y1); if (len < 0.1) return;
+    const m = new THREE.Mesh(new THREE.BoxGeometry(len, 0.8, Math.max(0.2, z || 0.3)), mat);
+    m.position.set((x1 + x2) / 2, (y1 + y2) / 2, Math.max(0.2, z || 0.3) / 2);
+    m.rotation.z = Math.atan2(y2 - y1, x2 - x1);
+    startLineObj.add(m);
+  });
+  scene.add(startLineObj); wake(3);
+}
+const START_LINE_COLOR = 0xff3df0;
+
 // ---------------- süre tahminini yazıcının baskı geçmişinden öğren
 let learned = null;
 async function learnFromHistory() {
