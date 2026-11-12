@@ -39,7 +39,7 @@ function toBlob(text, id) {
 }
 
 // ================================================================= durum ve profiller
-const APP_VERSION = '2.16';
+const APP_VERSION = '2.17';
 const FAST_PRESET = 'Hızlı baskı (uyarlanabilir 0.10–0.28)';
 let state = null;
 state = loadState();
@@ -1302,16 +1302,22 @@ async function loadFiles(files, replace, asObject) {
   files = [...files].filter(Boolean);
   if (!files.length) return;
   try {
-    let all = [];
+    // her dosya ayrı bir grup: "Aç" ve "Nesne ekle"de her dosya ayrı nesne olur;
+    // "Parça ekle"de (çok renkli model) hepsi seçili nesneye parça olarak eklenir
+    const groups = [];
     for (const f of files) {
-      if (/\.[a-z0-9]{2,5}$/i.test(f.name) && !/\.(stl|3mf)$/i.test(f.name)) { toast('Yalnızca STL ve 3MF dosyaları destekleniyor.', true); continue; }
+      if (/\.[a-z0-9]{2,5}$/i.test(f.name) && !/\.(stl|3mf)$/i.test(f.name)) { toast('Desteklenmeyen dosya atlandı: ' + f.name + ' (yalnızca STL ve 3MF).', true); continue; }
+      if (files.length > 1) { $('busy').hidden = false; $('busyText').textContent = `Dosyalar okunuyor ${groups.length + 1}/${files.length}: ${f.name}`; $('busyBar').style.width = (groups.length / files.length * 100).toFixed(0) + '%'; await new Promise(r => setTimeout(r, 0)); }
       const r = await readModel(f);
-      if (r.project) { await loadProject(r.project, r.name, replace || !parts.length); return; }
-      all = all.concat(r);
+      if (r.project) { $('busy').hidden = true; await loadProject(r.project, r.name, replace || !parts.length); return; }
+      if (r.length) groups.push(r);
     }
-    if (!all.length) return;
+    $('busy').hidden = true;
+    if (!groups.length) return;
+    const merge = !replace && !asObject && parts.length;
+    const all = groups.flat();
     // eklenen STL parçaları boş yuvalara dağıt
-    if (!replace && !asObject && parts.length) {
+    if (merge) {
       const usedSlots = new Set(parts.map(p => p.slot));
       all.forEach(p => { if (p.slot === 0) { for (let k = 0; k < SLOT_COUNT; k++) if (!usedSlots.has(k)) { p.slot = k; usedSlots.add(k); break; } } });
     }
@@ -1323,12 +1329,14 @@ async function loadFiles(files, replace, asObject) {
       if (r.report.changed) { p.positions = r.positions; fixes.push(repairSummary(r.report)); }
       else if (r.report.nonManifold) fixes.push(repairSummary(r.report));
     });
-    addParts(all, replace, false, asObject);
+    if (merge) addParts(all, false, false, false);
+    else groups.forEach((g, i) => addParts(g, replace && i === 0, false, asObject || i > 0));
     setView('iso');
     setTab('view');
     if (fixes.length) toast('Model onarıldı: ' + fixes.join('; '));
-    if (parts.length > 1) toast(`${parts.length} parça yüklendi. Model sekmesinden her parçanın yuvasını seçebilirsiniz.`);
-  } catch (e) { toast('Dosya okunamadı: ' + e.message, true); }
+    if (groups.length > 1 && !merge) toast(`${groups.length} dosya ${groups.length} ayrı nesne olarak tablaya yerleştirildi.`);
+    else if (parts.length > 1) toast(`${parts.length} parça yüklendi. Model sekmesinden her parçanın yuvasını seçebilirsiniz.`);
+  } catch (e) { $('busy').hidden = true; toast('Dosya okunamadı: ' + e.message, true); }
 }
 $('file').addEventListener('change', e => { loadFiles(e.target.files, true); e.target.value = ''; });
 $('fileAdd').addEventListener('change', e => { loadFiles(e.target.files, !parts.length); e.target.value = ''; });
@@ -1521,6 +1529,11 @@ $('calibResult').addEventListener('click', async () => {
 });
 
 // Android: dosya yöneticisinden "Birlikte aç"
+// Masaüstü: birden çok dosya ("Birlikte aç" ile seçilenler) — ilki tablayı değiştirir, diğerleri ayrı nesne olur
+window.k1LoadMany = (list) => {
+  const files = list.map(({ name, b64 }) => { const bin = atob(b64); const u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); return new File([u8], name || 'model.stl'); });
+  loadFiles(files, true);
+};
 window.k1LoadBase64 = (name, b64) => {
   const bin = atob(b64); const u8 = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);

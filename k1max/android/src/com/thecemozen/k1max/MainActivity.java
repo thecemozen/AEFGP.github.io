@@ -127,10 +127,12 @@ public class MainActivity extends Activity {
                 Intent i = new Intent(Intent.ACTION_GET_CONTENT);
                 i.addCategory(Intent.CATEGORY_OPENABLE);
                 i.setType("*/*");
+                // "Aç" / "Nesne ekle": birden çok dosya seçilebilsin
+                if (params.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE) i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
                 boolean json = false;
                 for (String a : params.getAcceptTypes()) if (a != null && a.contains("json")) json = true;
                 try {
-                    startActivityForResult(Intent.createChooser(i, json ? "Profil seç" : "STL dosyası seç"), PICK_FILE);
+                    startActivityForResult(Intent.createChooser(i, json ? "Profil seç" : "Model dosyalarını seç"), PICK_FILE);
                 } catch (Exception e) {
                     fileCallback = null;
                     return false;
@@ -173,7 +175,13 @@ public class MainActivity extends Activity {
     protected void onActivityResult(int req, int res, Intent data) {
         if (req == PICK_FILE && fileCallback != null) {
             Uri[] result = null;
-            if (res == RESULT_OK && data != null && data.getData() != null) result = new Uri[]{ data.getData() };
+            if (res == RESULT_OK && data != null) {
+                android.content.ClipData clip = data.getClipData();
+                if (clip != null && clip.getItemCount() > 0) {
+                    result = new Uri[clip.getItemCount()];
+                    for (int k = 0; k < result.length; k++) result[k] = clip.getItemAt(k).getUri();
+                } else if (data.getData() != null) result = new Uri[]{ data.getData() };
+            }
             fileCallback.onReceiveValue(result);
             fileCallback = null;
             return;

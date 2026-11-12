@@ -32,13 +32,11 @@ function filesFrom(argv) {
 function openFiles(list) {
   if (!list.length) return;
   if (!ready) { pending.push(...list); return; }
-  // Android'deki gibi: dosyayı base64 olarak sayfaya ver (tek seferde bir dosya; ilk dosya plakayı değiştirir)
-  for (const f of list.slice(0, 1)) {
-    try {
-      const b64 = fs.readFileSync(f).toString('base64');
-      win.webContents.executeJavaScript(`window.k1LoadBase64 && window.k1LoadBase64(${JSON.stringify(path.basename(f))}, ${JSON.stringify(b64)})`);
-    } catch (e) { dialog.showErrorBox('Dosya açılamadı', String(e.message || e)); }
-  }
+  // Dosyaları base64 olarak sayfaya ver: ilki tablayı değiştirir, diğerleri ayrı nesne olarak eklenir
+  try {
+    const items = list.map(f => ({ name: path.basename(f), b64: fs.readFileSync(f).toString('base64') }));
+    win.webContents.executeJavaScript(`window.k1LoadMany && window.k1LoadMany(${JSON.stringify(items)})`);
+  } catch (e) { dialog.showErrorBox('Dosya açılamadı', String(e.message || e)); }
 }
 
 function createWindow() {

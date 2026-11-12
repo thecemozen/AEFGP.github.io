@@ -244,3 +244,4 @@ body[data-tab="device"] .panel [data-sec="device"] { display: block; }
   .tbt { width: 40px; height: 40px; }
   #editHint { bottom: 54px; }
 }
+@media (min-width: 821px) { .legend { top: 64px; max-height: calc(100% - 80px); } }
