@@ -39,7 +39,7 @@ function toBlob(text, id) {
 }
 
 // ================================================================= durum ve profiller
-const APP_VERSION = '2.15';
+const APP_VERSION = '2.16';
 const FAST_PRESET = 'Hızlı baskı (uyarlanabilir 0.10–0.28)';
 let state = null;
 state = loadState();
@@ -108,7 +108,8 @@ function renderFlushHint() {
   const F = state.flush, used = [...new Set(parts.map(p => p.slot))];
   if (!F.on) { $('flushHint').textContent = `Kapalı: sabit ${state.process.values.purgeVolume} mm³`; return; }
   const vals = []; F.m.forEach((row, i) => row.forEach((v, j) => { if (i !== j && (used.length < 2 || (used.includes(i) && used.includes(j)))) vals.push(v * F.mult); }));
-  $('flushHint').textContent = vals.length ? `${Math.round(Math.min(...vals))}–${Math.round(Math.max(...vals))} mm³${F.mult !== 1 ? ' (×' + F.mult + ')' : ''}${F.auto ? ' · otomatik' : ''}` : '';
+  const where = state.process.values.flushTarget === 'tower' ? ' · kuleye' : ' · atık kanalına';
+  $('flushHint').textContent = vals.length ? `${Math.round(Math.min(...vals))}–${Math.round(Math.max(...vals))} mm³${F.mult !== 1 ? ' (×' + F.mult + ')' : ''}${F.auto ? ' · otomatik' : ''}${where}` : '';
 }
 function saveState() {
   try { store.set(STORE_KEY, JSON.stringify(state)); } catch (e) { /* yok say */ }
@@ -388,7 +389,8 @@ function renderQuick() {
 $('flushBtn').addEventListener('click', async () => {
   const F = state.flush, n = state.slots.length;
   const sw = (i) => `<span class="sw" style="background:${state.slots[i].color}"></span>${i + 1}`;
-  let html = '<p class="hint">Satır: çıkan renk, sütun: giren renk. Değer mm³ (kulede basılacak hacim). Koyudan açığa geçiş daha fazla ister.</p><table class="flush"><tr><th>↓ / →</th>';
+  const toTower = state.process.values.flushTarget === 'tower';
+  let html = `<p class="hint">Satır: çıkan renk, sütun: giren renk. Değer mm³. Koyudan açığa geçiş daha fazla ister. ${toTower ? 'Şu an hacmin tamamı <b>kulede</b> basılıyor.' : 'Şu an yıkamayı <b>yazıcı atık kanalından</b> yapıyor; kulede yalnızca küçük temizleme basılır. Değer G-code\'da {flush_volume} / {flush_length} olarak verilir.'} (Ayarlar → İşlem → Yıkama nereye)</p><table class="flush"><tr><th>↓ / →</th>`;
   for (let j = 0; j < n; j++) html += `<th>${sw(j)}</th>`;
   html += '</tr>';
   for (let i = 0; i < n; i++) {

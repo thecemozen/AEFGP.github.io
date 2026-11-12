@@ -305,7 +305,8 @@ export const PROCESS_SCHEMA = [
   ]},
   { g: 'Temizleme kulesi (CFS)', sec: 'Diğer', items: [
     { k: 'primeTower', l: 'Temizleme kulesi', t: 'b', tip: 'Birden fazla renk kullanıldığında her değişimde yeni rengi temizlemek için kule basılır.' },
-    { k: 'purgeVolume', l: 'Değişim başına temizleme', u: 'mm³', t: 'n', min: 0, max: 1000, s: 5, tip: "Yıkama hacimleri tablosu kapalıyken kullanılır: her renk değişiminde kulede basılacak hacim. Model sekmesi → CFS yuvaları → Yıkama hacimleri ile yuva çifti başına ayarlayın." },
+    { k: 'flushTarget', l: 'Yıkama nereye', t: 's', o: { chute: 'Yazıcının atık kanalına (CFS)', tower: 'Temizleme kulesine' }, tip: 'CFS: yazıcı filamenti kesip eski rengi atık kanalından kendisi boşaltır; kulede yalnızca aşağıdaki küçük hacim basılır (küçük kule). "Temizleme kulesine" seçilirse yıkama hacimleri tablosundaki hacmin tamamı kulede basılır: kule büyür, baskı uzar.' },
+    { k: 'purgeVolume', l: 'Kulede temizleme (değişim başına)', u: 'mm³', t: 'n', min: 0, max: 1000, s: 5, tip: "Atık kanalı seçiliyken her renk değişiminde kulede basılan küçük hacim (nozul basıncını ve rengi oturtur). Kuleye yıkamada ve tablo kapalıyken de kullanılır." },
     { k: 'towerWidth', l: 'Kule genişliği', u: 'mm', t: 'n', min: 10, max: 80, s: 1 },
     { k: 'towerSpeed', l: 'Kule hızı', u: 'mm/s', t: 'n', min: 10, max: 400, s: 10, adv: true },
     { k: 'towerAuto', l: 'Kule konumu otomatik', t: 'b' },
@@ -340,7 +341,7 @@ export const PROCESS_BASE = {
   supportEnable: false, supportAngle: 30, supportBuildPlateOnly: false, supportPattern: 'rectilinear', supportSpacing: 2.5,
   supportTopZ: 0.2, supportBottomZ: 0.2, supportXY: 0.35, supportInterfaceLayers: 2, supportInterfaceSpacing: 0.5, supportSlot: 'auto',
   skirtLoops: 1, skirtDistance: 5, skirtHeight: 1, brimWidth: 0, brimGap: 0.1,
-  primeTower: true, purgeVolume: 120, towerWidth: 35, towerSpeed: 150, towerAuto: true, towerX: 230, towerY: 230,
+  primeTower: true, flushTarget: 'chute', purgeVolume: 120, towerWidth: 35, towerSpeed: 150, towerAuto: true, towerX: 230, towerY: 230,
   spiralVase: false, previewTravel: false, timeFactor: 1.08,
 };
 
