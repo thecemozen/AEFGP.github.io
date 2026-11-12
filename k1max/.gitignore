@@ -4,4 +4,4 @@ android/*.jks
 dist/*.idsig
 android/app/assets/
 desktop/build/
-dist/*.exe
+
