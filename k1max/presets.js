@@ -55,7 +55,7 @@ export const PRINTER_SCHEMA = [
   { g: 'CFS / renk değişimi', items: [
     { k: 'toolChangeLift', l: 'Değişimde Z kaldırma', u: 'mm', t: 'n', min: 0, max: 10, s: 0.1, tip: '{z_lift} değişkeni = mevcut Z + bu değer.' },
     { k: 'toolChangeTime', l: 'Değişim süresi (tahmin)', u: 'sn', t: 'n', min: 0, max: 300, s: 5, tip: 'Yalnızca süre tahmini için: kesme, boşaltma, yükleme ve temizlemenin toplam süresi.' },
-    { k: 'changeFilamentGcode', l: 'Filament değiştirme G-code', t: 'g', tip: 'Değişkenler: {current_tool} {next_tool} {next_temp} {z} {z_lift} {layer}' },
+    { k: 'changeFilamentGcode', l: 'Filament değiştirme G-code', t: 'g', tip: 'Değişkenler: {current_tool} {next_tool} {next_temp} {z} {z_lift} {layer} {flush_volume} (mm³) {flush_length} (mm filament)' },
   ]},
   { g: 'Özel G-code', items: [
     { k: 'startGcode', l: 'Başlangıç G-code', t: 'g', tip: 'Değişkenler: {nozzle_first} {bed_first} {nozzle} {bed} {initial_tool} {first_layer_height} {filament_type}' },
@@ -130,7 +130,7 @@ export const FILAMENT_SCHEMA = [
     { k: 'zHop', l: 'Z kaldırma', u: 'mm', t: 'on', min: 0, max: 3, s: 0.05 },
   ]},
   { g: 'Çok renk (CFS)', items: [
-    { k: 'purgeMultiplier', l: 'Temizleme çarpanı', t: 'n', min: 0.2, max: 4, s: 0.1, tip: 'Bu filamente geçerken temizleme hacmi × bu değer. Koyudan açık renge geçişte artırın.' },
+    { k: 'purgeMultiplier', l: 'Temizleme çarpanı', t: 'n', min: 0.2, max: 4, s: 0.1, tip: 'Yıkama hacimleri tablosu kapalıyken: bu filamente geçerken temizleme hacmi × bu değer.' },
   ]},
   { g: 'Özel G-code', adv: true, items: [
     { k: 'startGcode', l: 'Filament başlangıç G-code', t: 'g' },
@@ -179,6 +179,9 @@ export const PROCESS_SCHEMA = [
   { g: 'Kalite', sec: 'Kalite', items: [
     { k: 'layerHeight', l: 'Katman yüksekliği', u: 'mm', t: 'n', min: 0.04, max: 0.32, s: 0.01 },
     { k: 'firstLayerHeight', l: 'İlk katman yüksekliği', u: 'mm', t: 'n', min: 0.1, max: 0.35, s: 0.01 },
+  ]},
+  { g: 'Çözünürlük', sec: 'Kalite', items: [
+    { k: 'resolution', l: 'Kesit çözünürlüğü', u: 'mm', t: 'n', min: 0, max: 0.1, s: 0.0005, tip: 'Kesitteki bu mesafeden küçük ayrıntılar sadeleştirilir (Orca: 0.012). Milyonlarca üçgenli modellerde dilimlemeyi kat kat hızlandırır; nozulun basabileceği ayrıntı kaybolmaz.', adv: true },
   ]},
   { g: 'Uyarlanabilir katman', sec: 'Kalite', items: [
     { k: 'adaptiveLayers', l: 'Uyarlanabilir katman yüksekliği', t: 'b', tip: 'Dik duvarlarda kalın, eğik ve kavisli yüzeylerde ince katman: aynı görünüşte daha kısa süre ya da aynı sürede daha pürüzsüz yüzey. Katman yüksekliği ayarı yerine aşağıdaki aralık kullanılır.' },
@@ -302,7 +305,7 @@ export const PROCESS_SCHEMA = [
   ]},
   { g: 'Temizleme kulesi (CFS)', sec: 'Diğer', items: [
     { k: 'primeTower', l: 'Temizleme kulesi', t: 'b', tip: 'Birden fazla renk kullanıldığında her değişimde yeni rengi temizlemek için kule basılır.' },
-    { k: 'purgeVolume', l: 'Değişim başına temizleme', u: 'mm³', t: 'n', min: 0, max: 1000, s: 5, tip: "Firmware'in CFS kesme/boşaltma işleminden sonra kulede ek olarak basılacak hacim." },
+    { k: 'purgeVolume', l: 'Değişim başına temizleme', u: 'mm³', t: 'n', min: 0, max: 1000, s: 5, tip: "Yıkama hacimleri tablosu kapalıyken kullanılır: her renk değişiminde kulede basılacak hacim. Model sekmesi → CFS yuvaları → Yıkama hacimleri ile yuva çifti başına ayarlayın." },
     { k: 'towerWidth', l: 'Kule genişliği', u: 'mm', t: 'n', min: 10, max: 80, s: 1 },
     { k: 'towerSpeed', l: 'Kule hızı', u: 'mm/s', t: 'n', min: 10, max: 400, s: 10, adv: true },
     { k: 'towerAuto', l: 'Kule konumu otomatik', t: 'b' },
@@ -319,7 +322,7 @@ export const PROCESS_SCHEMA = [
 ];
 
 export const PROCESS_BASE = {
-  layerHeight: 0.2, firstLayerHeight: 0.2, adaptiveLayers: false, adaptiveMinH: 0.08, adaptiveMaxH: 0.28, adaptiveQuality: 50,
+  layerHeight: 0.2, firstLayerHeight: 0.2, resolution: 0.0125, adaptiveLayers: false, adaptiveMinH: 0.08, adaptiveMaxH: 0.28, adaptiveQuality: 50,
   lineWidth: 0.42, firstLayerLineWidth: 0.5, outerWallLineWidth: 0.42, innerWallLineWidth: 0.45, topLineWidth: 0.42,
   solidLineWidth: 0.42, sparseLineWidth: 0.45, supportLineWidth: 0.42,
   seam: 'corner', seamGap: 10, scarfSeam: 'none', scarfLength: 10, scarfStartHeight: 0,

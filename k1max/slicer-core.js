@@ -41,6 +41,12 @@
     co.AddPaths(paths, round ? CL.JoinType.jtRound : CL.JoinType.jtMiter, CL.EndType.etClosedPolygon);
     var out = new CL.Paths();
     co.Execute(out, delta * SCALE);
+    // ofset, dokulu yüzeylerde nokta sayısını katlar: çözünürlük altındaki ayrıntıyı at (sonraki tüm işlemler hızlanır)
+    if (RES > 0) {
+      var res = [];
+      for (var i = 0; i < out.length; i++) { var q = out[i].length > 16 ? simplifyClosed(out[i], RES * SCALE) : out[i]; if (q.length >= 3) res.push(q); }
+      out = res;
+    }
     return out;
   }
   // morfolojik açma: genişliği d'den ince parçaları atar
@@ -124,6 +130,33 @@
     return { v: v, idx: idx, nTri: nTri, maxZ: maxZ };
   }
 
+  var RES = 0.0125;
+  // Kapalı çokgeni Douglas-Peucker ile sadeleştir (tol: Clipper birimi)
+  function simplifyClosed(pts, tol) {
+    var n = pts.length;
+    if (n < 8) return pts;
+    // en uzak iki noktadan böl, iki yarıyı ayrı sadeleştir
+    var far = 0, fd = -1;
+    for (var i = 1; i < n; i++) { var dx = pts[i].X - pts[0].X, dy = pts[i].Y - pts[0].Y, d = dx * dx + dy * dy; if (d > fd) { fd = d; far = i; } }
+    var keep = new Uint8Array(n); keep[0] = 1; keep[far] = 1;
+    var tol2 = tol * tol, stack = [[0, far], [far, n]];
+    while (stack.length) {
+      var seg = stack.pop(), a = seg[0], b = seg[1], A = pts[a], B = pts[b % n];
+      if (b - a < 2) continue;
+      var ex = B.X - A.X, ey = B.Y - A.Y, el = ex * ex + ey * ey, best = -1, bd = tol2;
+      for (var k = a + 1; k < b; k++) {
+        var px = pts[k].X - A.X, py = pts[k].Y - A.Y, dd;
+        if (el === 0) dd = px * px + py * py;
+        else { var cr = px * ey - py * ex; dd = cr * cr / el; }
+        if (dd > bd) { bd = dd; best = k; }
+      }
+      if (best >= 0) { keep[best] = 1; stack.push([a, best], [best, b]); }
+    }
+    var out = [];
+    for (i = 0; i < n; i++) if (keep[i]) out.push(pts[i]);
+    return out;
+  }
+
   function sliceAt(mesh, tris, z) {
     var v = mesh.v, idx = mesh.idx;
     var segs = [];
@@ -190,6 +223,9 @@
       if (ch.length >= 3) loops.push(ch); // birleşecek başka zincir yoksa kendi uçlarından kapat (katman kaybolmasın)
     }
     if (!loops.length) return [];
+    // Çözünürlük: çok yoğun (milyonlarca üçgenli) modellerde kesit binlerce minik noktadan oluşur;
+    // nozulun basamayacağı ayrıntıyı at (Orca: "resolution" 0.012 mm). Dilimleme bu sayede kat kat hızlanır.
+    if (RES > 0) loops = loops.map(function (l) { return simplifyClosed(l, RES * SCALE); }).filter(function (l) { return l.length >= 3; });
     var cl = new CL.Clipper();
     cl.AddPaths(loops, CL.PolyType.ptSubject, true);
     var out = new CL.Paths();
@@ -270,6 +306,45 @@
       }
     }
     return clipOpen(curves, region);
+  }
+
+  // Bölge kenarları için ızgara dizini (bölge dizisinin üzerinde önbelleklenir)
+  function edgeGrid(region) {
+    if (region._grid) return region._grid;
+    var cell = 2 * SCALE, cells = new Map(), ex = [];
+    region.forEach(function (path) {
+      for (var i = 0; i < path.length; i++) {
+        var p = path[i], q = path[(i + 1) % path.length], id = ex.length / 4;
+        ex.push(p.X, p.Y, q.X, q.Y);
+        var x0 = Math.floor(Math.min(p.X, q.X) / cell), x1 = Math.floor(Math.max(p.X, q.X) / cell);
+        var y0 = Math.floor(Math.min(p.Y, q.Y) / cell), y1 = Math.floor(Math.max(p.Y, q.Y) / cell);
+        for (var gx = x0; gx <= x1; gx++) for (var gy = y0; gy <= y1; gy++) {
+          var k = gx * 100003 + gy, l = cells.get(k); if (!l) cells.set(k, l = []); l.push(id);
+        }
+      }
+    });
+    region._grid = { cell: cell, cells: cells, ex: ex, stamp: new Int32Array(ex.length / 4), gen: 0 };
+    return region._grid;
+  }
+  function segCrossesRegion(a, b, region) {
+    var G = edgeGrid(region), ex = G.ex, cell = G.cell;
+    var ax = a[0] * SCALE, ay = a[1] * SCALE, bx = b[0] * SCALE, by = b[1] * SCALE;
+    var x0 = Math.floor(Math.min(ax, bx) / cell), x1 = Math.floor(Math.max(ax, bx) / cell);
+    var y0 = Math.floor(Math.min(ay, by) / cell), y1 = Math.floor(Math.max(ay, by) / cell);
+    var gen = ++G.gen;
+    var dx = bx - ax, dy = by - ay;
+    for (var gx = x0; gx <= x1; gx++) for (var gy = y0; gy <= y1; gy++) {
+      var l = G.cells.get(gx * 100003 + gy); if (!l) continue;
+      for (var i = 0; i < l.length; i++) {
+        var e = l[i]; if (G.stamp[e] === gen) continue; G.stamp[e] = gen;
+        var px = ex[e * 4], py = ex[e * 4 + 1], qx = ex[e * 4 + 2], qy = ex[e * 4 + 3];
+        var ex2 = qx - px, ey2 = qy - py, den = dx * ey2 - dy * ex2;
+        if (den === 0) continue;
+        var t = ((px - ax) * ey2 - (py - ay) * ex2) / den, u = ((px - ax) * dy - (py - ay) * dx) / den;
+        if (t > 0 && t < 1 && u >= 0 && u <= 1) return true;
+      }
+    }
+    return false;
   }
 
   function clipOpen(curves, region) {
@@ -731,19 +806,17 @@
     var nL = layers.length;
     parts.forEach(function (part, pi) {
       var mesh = part.mesh;
-      var buckets = [];
-      for (var b = 0; b < nL; b++) buckets.push([]);
+      var buckets = [], mids = new Float64Array(nL);
+      for (var b = 0; b < nL; b++) { buckets.push([]); mids[b] = layers[b].z - layers[b].h / 2; }
       var v = mesh.v;
       for (var t = 0; t < mesh.nTri; t++) {
         var a0 = mesh.idx[t * 3], a1 = mesh.idx[t * 3 + 1], a2 = mesh.idx[t * 3 + 2];
         var z0 = v[a0 * 3 + 2], z1 = v[a1 * 3 + 2], z2 = v[a2 * 3 + 2];
         var zmin = Math.min(z0, z1, z2), zmax = Math.max(z0, z1, z2);
-        for (var L = 0; L < nL; L++) {
-          var sz = layers[L].z - layers[L].h / 2;
-          if (sz < zmin) continue;
-          if (sz > zmax) break;
-          buckets[L].push(t);
-        }
+        // ilk uygun katmanı ikili aramayla bul (milyonlarca üçgende baştan taramak çok yavaş)
+        var lo = 0, hi = nL;
+        while (lo < hi) { var mid = (lo + hi) >> 1; if (mids[mid] < zmin) lo = mid + 1; else hi = mid; }
+        for (var L = lo; L < nL && mids[L] <= zmax; L++) buckets[L].push(t);
       }
       part.outline = [];
       for (var li = 0; li < nL; li++) {
@@ -754,40 +827,42 @@
   }
 
   // ---------------------------------------------------------------- 2) bölge işleme (duvar, dolgu, üst/alt, köprü)
-  function processPart(part, layers, S, below) {
-    var nL = layers.length;
+  // Katman bölgesi, 1. aşama: yalnızca o katmanın kesitine bağlı (duvarlar, dolgu alanı, boşluk dolgusu).
+  // Saf işlev: katmanlar birbirinden bağımsız hesaplanabilir (çok çekirdekte paralel).
+  function regionA(outline, li, layers, S) {
     var W = S.W;
     var wallsN = S.spiralVase ? 1 : Math.max(1, S.wallLoops);
-    var R = part.regions = [];
-    for (var li = 0; li < nL; li++) {
-      var outline = part.outline[li];
-      if (outline.length) {
-        outline = xyCompensate(outline, S.xyContourCompensation, S.xyHoleCompensation);
-        if (li === 0 && S.elephantFoot) outline = offset(outline, -S.elephantFoot, false);
-      }
-      var first = li === 0;
-      var wo = first ? W.first : W.outer, wi = first ? W.first : W.inner;
-      var walls = [];
-      var hl = layers[li].h;
-      var so = flowSpacing(wo, hl), si = flowSpacing(wi, hl);
-      var cur = offset(outline, -wo / 2, false);
-      for (var k = 0; k < wallsN && cur.length; k++) {
-        walls.push(cur);
-        if (k < wallsN - 1) cur = offset(cur, -(k === 0 ? (so + si) / 2 : si), false);
-      }
-      var lastW = walls.length > 1 ? wi : wo;
-      var last = walls.length ? walls[walls.length - 1] : [];
-      var fill = walls.length ? opening(offset(last, -lastW / 2 + S.infillOverlap / 100 * lastW, false), 0.1) : [];
-      var ref = walls.length ? offset(last, -lastW / 2, false) : [];
-      var gaps = [];
-      if (S.gapFill && !S.spiralVase && outline.length) {
-        var beads = [];
-        walls.forEach(function (wp, k) { var ww = k === 0 ? wo : wi; beads = beads.concat(difference(offset(wp, ww / 2, false), offset(wp, -ww / 2, false))); });
-        var uncovered = opening(difference(outline, union(beads.concat(fill))), S.gapFillMin);
-        if (uncovered.length && Math.abs(areaOf(uncovered)) > S.gapFillMin * 0.5) gaps = gapPolylines(uncovered, S.gapFillMin, 2 * Math.max(wo, wi));
-      }
-      R.push({ outline: outline, walls: walls, fill: fill, ref: ref, gaps: gaps });
+    if (outline.length) {
+      outline = xyCompensate(outline, S.xyContourCompensation, S.xyHoleCompensation);
+      if (li === 0 && S.elephantFoot) outline = offset(outline, -S.elephantFoot, false);
     }
+    var first = li === 0;
+    var wo = first ? W.first : W.outer, wi = first ? W.first : W.inner;
+    var walls = [];
+    var hl = layers[li].h;
+    var so = flowSpacing(wo, hl), si = flowSpacing(wi, hl);
+    var cur = offset(outline, -wo / 2, false);
+    for (var k = 0; k < wallsN && cur.length; k++) {
+      walls.push(cur);
+      if (k < wallsN - 1) cur = offset(cur, -(k === 0 ? (so + si) / 2 : si), false);
+    }
+    var lastW = walls.length > 1 ? wi : wo;
+    var last = walls.length ? walls[walls.length - 1] : [];
+    var fill = walls.length ? opening(offset(last, -lastW / 2 + S.infillOverlap / 100 * lastW, false), 0.1) : [];
+    var ref = walls.length ? offset(last, -lastW / 2, false) : [];
+    var gaps = [];
+    if (S.gapFill && !S.spiralVase && outline.length) {
+      var beads = [];
+      walls.forEach(function (wp, k) { var ww = k === 0 ? wo : wi; beads = beads.concat(difference(offset(wp, ww / 2, false), offset(wp, -ww / 2, false))); });
+      var uncovered = opening(difference(outline, union(beads.concat(fill))), S.gapFillMin);
+      if (uncovered.length && Math.abs(areaOf(uncovered)) > S.gapFillMin * 0.5) gaps = gapPolylines(uncovered, S.gapFillMin, 2 * Math.max(wo, wi));
+    }
+    return { outline: outline, walls: walls, fill: fill, ref: ref, gaps: gaps };
+  }
+
+  // Üst/alt kabuk parametreleri ve bir katmanın kaç katman yukarı/aşağı bakması gerektiği
+  function shellInfo(layers, S) {
+    var nL = layers.length;
     var topN = Math.max(S.topLayers, Math.ceil(S.topThickness / S.layerHeight - 1e-6));
     var botN = Math.max(S.bottomLayers, Math.ceil(S.bottomThickness / S.layerHeight - 1e-6));
     if (S.spiralVase) topN = 0;
@@ -807,48 +882,267 @@
       while (li - k - 1 >= 0 && (k < 2 || t < bT - 1e-6)) { k++; t += layers[li - k].h; }
       return (k < 2 || t < bT - 1e-6) ? li + 1 : k; // altta yeterli kalınlık yok: tamamı alt yüzey
     }
-    for (li = 0; li < nL; li++) {
-      var r = R[li];
-      if (!r.fill.length) { r.solid = []; r.sparse = []; r.top = []; r.bridge = []; continue; }
-      var fill = r.fill, top = [], bottom = [];
-      if (S.spiralVase && li >= botN) { r.solid = []; r.sparse = []; r.top = []; r.bridge = []; continue; }
-      var tN = nUp(li), bN = nDown(li);
-      if (topN > 0) {
-        if (li + tN >= nL) top = fill; else {
-          var acc = fill;
-          for (var k1 = 1; k1 <= tN && acc.length; k1++) acc = intersect(acc, R[li + k1].ref);
-          top = difference(fill, acc);
-        }
+    return { topN: topN, botN: botN, nUp: nUp, nDown: nDown };
+  }
+
+  // Katman bölgesi, 2. aşama: komşu katmanlara bakar (üst/alt yüzey, katı/seyrek dolgu, köprü).
+  // R: en az [li-aşağı .. li+yukarı] aralığındaki 1. aşama sonuçları; below: birleşik kesitler (U).
+  function regionB(li, R, layers, S, below, sh) {
+    var nL = layers.length, W = S.W;
+    var topN = sh.topN, botN = sh.botN;
+    var r = R[li];
+    if (!r.fill.length) { r.solid = []; r.sparse = []; r.top = []; r.bridge = []; return r; }
+    var fill = r.fill, top = [], bottom = [];
+    if (S.spiralVase && li >= botN) { r.solid = []; r.sparse = []; r.top = []; r.bridge = []; return r; }
+    var tN = sh.nUp(li), bN = sh.nDown(li);
+    if (topN > 0) {
+      if (li + tN >= nL) top = fill; else {
+        var acc = fill;
+        for (var k1 = 1; k1 <= tN && acc.length; k1++) acc = intersect(acc, R[li + k1].ref);
+        top = difference(fill, acc);
       }
-      if (botN > 0) {
-        if (li < bN) bottom = fill; else {
-          var acc2 = fill;
-          for (var k2 = 1; k2 <= bN && acc2.length; k2++) acc2 = intersect(acc2, R[li - k2].ref);
-          bottom = difference(fill, acc2);
-        }
-      }
-      var solid = union(top.concat(bottom));
-      solid = intersect(offset(offset(solid, -W.solid * 0.3, false), W.solid * 0.6, false), fill);
-      var density = S.spiralVase ? 0 : S.infillDensity;
-      var sparse = density > 0 ? difference(fill, solid) : [];
-      // küçük seyrek bölgeleri katı yap
-      if (sparse.length && S.minSparseArea > 0) {
-        var small = [];
-        islandsOf(sparse).forEach(function (isl) { if (areaOf(isl) < S.minSparseArea) small = small.concat(isl); });
-        if (small.length) { solid = union(solid.concat(intersect(small, fill))); sparse = difference(sparse, small); }
-      }
-      // köprüler: altında hiçbir şey olmayan katı alan
-      var bridge = [];
-      if (S.bridgeDetect && li > 0 && solid.length) {
-        var unsupported = difference(fill, offset(below[li - 1], 0.05, false));
-        unsupported = opening(unsupported, W.solid);
-        if (unsupported.length) bridge = intersect(solid, offset(unsupported, W.solid, false));
-      }
-      r.solid = difference(solid, bridge);
-      r.bridge = bridge;
-      r.sparse = sparse;
-      r.top = li === nL - 1 ? fill : opening(difference(fill, R[li + 1].fill), W.top);
     }
+    if (botN > 0) {
+      if (li < bN) bottom = fill; else {
+        var acc2 = fill;
+        for (var k2 = 1; k2 <= bN && acc2.length; k2++) acc2 = intersect(acc2, R[li - k2].ref);
+        bottom = difference(fill, acc2);
+      }
+    }
+    var solid = union(top.concat(bottom));
+    solid = intersect(offset(offset(solid, -W.solid * 0.3, false), W.solid * 0.6, false), fill);
+    var density = S.spiralVase ? 0 : S.infillDensity;
+    var sparse = density > 0 ? difference(fill, solid) : [];
+    // küçük seyrek bölgeleri katı yap
+    if (sparse.length && S.minSparseArea > 0) {
+      var small = [];
+      islandsOf(sparse).forEach(function (isl) { if (areaOf(isl) < S.minSparseArea) small = small.concat(isl); });
+      if (small.length) { solid = union(solid.concat(intersect(small, fill))); sparse = difference(sparse, small); }
+    }
+    // köprüler: altında hiçbir şey olmayan katı alan
+    var bridge = [];
+    if (S.bridgeDetect && li > 0 && solid.length) {
+      var unsupported = difference(fill, offset(below[li - 1], 0.05, false));
+      unsupported = opening(unsupported, W.solid);
+      if (unsupported.length) bridge = intersect(solid, offset(unsupported, W.solid, false));
+    }
+    r.solid = difference(solid, bridge);
+    r.bridge = bridge;
+    r.sparse = sparse;
+    r.top = li === nL - 1 ? fill : opening(difference(fill, R[li + 1].fill), W.top);
+    return r;
+  }
+
+  function processPart(part, layers, S, below) {
+    var nL = layers.length;
+    var R = part.regions = [];
+    for (var li = 0; li < nL; li++) R.push(regionA(part.outline[li], li, layers, S));
+    var sh = shellInfo(layers, S);
+    for (li = 0; li < nL; li++) regionB(li, R, layers, S, below, sh);
+  }
+
+  // Tüm parçaların katman planlarını yardımcılara dağıtır (G-code yazımından önce)
+  function plansParallel(q, pool, progress) {
+    var layers = q.layers, S = q.S, nL = layers.length, parts = q.parts;
+    var nChunk = Math.max(1, Math.min(nL, pool.size * 4)), size = Math.ceil(nL / nChunk), tasks = [];
+    for (var a = 0; a < nL; a += size) {
+      var items = [];
+      for (var li = a; li < Math.min(nL, a + size); li++) {
+        items.push({ li: li, Unext: q.U[li + 1] || [], comb: !!(S.avoidCrossingWalls && !(S.spiralVase && li >= S.spiralStart)), parts: parts.map(function (p) {
+          var r = p.regions[li];
+          if (!r || !r.outline.length) return null;
+          return { r: { outline: r.outline, walls: r.walls, solid: r.solid, top: r.top, sparse: r.sparse, bridge: r.bridge }, combo: comboFor(p, li, nL, S) };
+        }) });
+      }
+      tasks.push({ kind: 'C', S: S, layers: layers, items: items });
+    }
+    progress(0.72, 'Dolgu çizgileri · ' + pool.size + ' çekirdek');
+    return pool.run(tasks).then(function (res) {
+      parts.forEach(function (p) { p.plans = p.plans || []; });
+      q.job.combPre = [];
+      res.forEach(function (list) { list.forEach(function (x) {
+        x.plans.forEach(function (pl, pi) { if (pl) parts[pi].plans[x.li] = pl; });
+        if (x.comb !== undefined) q.job.combPre[x.li] = x.comb;
+      }); });
+    });
+  }
+
+  // Paralel çalıştırma: yardımcı iş parçacığında tek bir görev (paylaşılan durum yok)
+  function runTask(t) {
+    RES = Math.max(0, num(t.S.resolution, 0.0125));
+    if (t.kind === 'C') {
+      var nL = t.layers.length;
+      return t.items.map(function (it) {
+        var Ly = t.layers[it.li], spiral = t.S.spiralVase && it.li >= t.S.spiralStart;
+        var res = { li: it.li, plans: it.parts.map(function (pp) { return pp ? planPart(pp.r, it.li, nL, t.S, Ly.h, Ly.z, spiral, pp.combo, it.Unext) : null; }) };
+        if (it.comb) res.comb = combRegions(it.parts.filter(Boolean).map(function (pp) { return pp.r.outline; }), it.li, t.S.W);
+        return res;
+      });
+    }
+    if (t.kind === 'A') return t.items.map(function (it) { return { li: it.li, r: regionA(it.outline, it.li, t.layers, t.S) }; });
+    var sh = shellInfo(t.layers, t.S);
+    return t.items.map(function (li) {
+      var r = regionB(li, t.R, t.layers, t.S, t.below, sh);
+      return { li: li, solid: r.solid, sparse: r.sparse, top: r.top, bridge: r.bridge };
+    });
+  }
+
+  // Bir parçanın bölgelerini yardımcı iş parçacıklarına bölüştürerek hesaplar. pool.run(görevler) → Promise<sonuçlar[]>
+  function processPartParallel(part, layers, S, below, pool, progress, label) {
+    var nL = layers.length, R = part.regions = new Array(nL);
+    var nChunk = Math.max(1, Math.min(nL, pool.size * 4)), size = Math.ceil(nL / nChunk);
+    var tasks = [];
+    for (var a = 0; a < nL; a += size) {
+      var items = [];
+      for (var li = a; li < Math.min(nL, a + size); li++) items.push({ li: li, outline: part.outline[li] });
+      tasks.push({ kind: 'A', S: S, layers: layers, items: items });
+    }
+    progress(0.3, 'Duvarlar ve dolgu (' + label + ') · ' + pool.size + ' çekirdek');
+    return pool.run(tasks).then(function (res) {
+      res.forEach(function (list) { list.forEach(function (x) { R[x.li] = x.r; }); });
+      var sh = shellInfo(layers, S), tasksB = [];
+      for (var a2 = 0; a2 < nL; a2 += size) {
+        var b2 = Math.min(nL, a2 + size), lo = a2, hi = b2;
+        var its = [];
+        for (var l2 = a2; l2 < b2; l2++) {
+          its.push(l2);
+          lo = Math.min(lo, l2 - Math.min(l2, sh.nDown(l2)) - 1);
+          hi = Math.max(hi, Math.min(nL - 1, l2 + Math.min(nL, sh.nUp(l2))) + 2);
+        }
+        lo = Math.max(0, lo); hi = Math.min(nL, hi);
+        var win = {}, bel = {};
+        for (var j = lo; j < hi; j++) win[j] = R[j];
+        for (j = Math.max(0, a2 - 1); j < b2; j++) bel[j] = below[j];
+        tasksB.push({ kind: 'B', S: S, layers: layers, items: its, R: win, below: bel });
+      }
+      progress(0.45, 'Üst/alt yüzeyler (' + label + ') · ' + pool.size + ' çekirdek');
+      return pool.run(tasksB);
+    }).then(function (res) {
+      res.forEach(function (list) { list.forEach(function (x) { var r = R[x.li]; r.solid = x.solid; r.sparse = x.sparse; r.top = x.top; r.bridge = x.bridge; }); });
+    });
+  }
+
+  // ---------------------------------------------------------------- katman planı (saf: paralel hesaplanabilir)
+  // Üst yüzey yönü (otomatik): en az çizgi = en uzun çizgiler = en az çizgi ucu
+  function longestAngle(region) {
+    var best = 0, bestN = Infinity;
+    for (var a = 0; a < 180; a += 15) { var n = lineFill(region, 2, a).length; if (n < bestN) { bestN = n; best = a; } }
+    return best;
+  }
+  // köprüyü en kısa açıklık yönünde at: dört açıyı dene, en kısa ortalama çizgiyi seç
+  function bridgeAngleOf(region, W) {
+    var best = 0, bestLen = Infinity;
+    [0, 45, 90, 135].forEach(function (a) {
+      var ls = lineFill(region, W.solid * 3, a);
+      if (!ls.length) return;
+      var tot = 0; ls.forEach(function (l) { tot += Math.hypot(l[2] - l[0], l[3] - l[1]); });
+      if (tot / ls.length < bestLen) { bestLen = tot / ls.length; best = a; }
+    });
+    return best;
+  }
+  // Hızlı desen: aralarında en az 40° olan ve toplamda en az (yani en uzun) çizgiyi veren iki yön.
+  // İnce duvarda iki yön de duvar boyunca uzanır; yuvarlak bölgede 90° farklı iki yön seçilir.
+  function speedAngles(region, spacing) {
+    var cnt = [];
+    for (var a = 0; a < 180; a += 15) cnt.push([a, lineFill(region, spacing, a).length]);
+    var best = [0, 90], bestC = Infinity, bestSep = 0;
+    for (var i = 0; i < cnt.length; i++) for (var j = i + 1; j < cnt.length; j++) {
+      var sep = Math.min(cnt[j][0] - cnt[i][0], 180 - (cnt[j][0] - cnt[i][0]));
+      if (sep < 40) continue;
+      var c = cnt[i][1] + cnt[j][1];
+      if (c < bestC - 0.5 || (Math.abs(c - bestC) <= 0.5 && sep > bestSep)) { bestC = c; best = [cnt[i][0], cnt[j][0]]; bestSep = sep; }
+    }
+    return best;
+  }
+  // Seyrek dolgu çizgileri (desene göre). Gyroid ve eş merkezli için null: onlar basılırken üretilir.
+  function sparseLines(region, hMul, li, z, S, W, first) {
+    var wsp = first ? W.first : W.sparse, d = S.infillDensity / 100, A = S.infillAngle, pat = S.infillPattern;
+    var gi = Math.floor(li / (hMul || 1));
+    var single = null;
+    if (pat === 'helix') single = A + gi * S.helixStep;
+    else if (pat === 'golden') single = A + gi * 137.508;
+    else if (pat === 'speed') single = speedAngles(region, wsp / d)[gi % 2];
+    if (single !== null) return lineFill(region, wsp / d, single % 180);
+    if (pat === 'gyroid' || pat === 'concentric') return null;
+    if (pat === 'grid') { var s2 = 2 * wsp / d; return lineFill(region, s2, A).concat(lineFill(region, s2, A + 90)); }
+    if (pat === 'triangles') { var s3 = 3 * wsp / d; return lineFill(region, s3, A).concat(lineFill(region, s3, A + 60), lineFill(region, s3, A - 60)); }
+    if (pat === 'cubic') {
+      // 3 yönlü, z ile kayan çizgiler: kübik dolguya yakın bir yapı
+      var s4 = 3 * wsp / d, shift = (z % s4) / Math.SQRT2;
+      var mk = function (a, sh) { return lineFill(region.map(function (pth) { return pth.map(function (q) { return { X: q.X + Math.round(sh * SCALE), Y: q.Y }; }); }), s4, a)
+        .map(function (l) { return [l[0] - sh, l[1], l[2] - sh, l[3], l[4], l[5]]; }); };
+      return mk(A, shift).concat(mk(A + 60, -shift), mk(A - 60, shift * 0.5));
+    }
+    return lineFill(region, wsp / d, gi % 2 ? A : A + 90); // doğrusal
+  }
+  // Bir parçanın bir katmandaki planı: adalar, ada başına duvar kümeleri, dolgu bölgeleri ve hazır dolgu çizgileri.
+  // Yazıcı kafasının konumuna bağlı değildir; sıralama ve G-code yazımı sonra, sırayla yapılır.
+  function planPart(r, li, nL, S, h, z, spiral, combo, Unext) {
+    var W = S.W, first = li === 0;
+    var N = S.adaptiveActive ? 1 : Math.max(1, Math.min(4, S.infillEvery | 0));
+    return islandsOf(r.outline).map(function (isl) {
+      var big = offset(isl, 0.01, false);
+      var P = { wallSets: r.walls.map(function (wp) { return intersect(wp, big); }) };
+      if (spiral) return P;
+      var solid = intersect(r.solid, big), top = intersect(r.top, big), sparse = intersect(r.sparse, big), bridge = intersect(r.bridge, big);
+      var topOnly = intersect(top, solid);
+      var solidNoTop = difference(solid, topOnly);
+      var ang = (li % 2 === 0) ? S.solidAngle : S.solidAngle + 90;
+      var ws = first ? W.first : W.solid;
+      P.solidNoTop = solidNoTop; P.ang = ang;
+      var solidPat = first ? S.bottomPattern : 'lines';
+      if (solidNoTop.length && solidPat !== 'concentric') P.solidLines = lineFill(solidNoTop, flowSpacing(ws, h), ang);
+      if (solidNoTop.length && solidPat === 'monotonic') P.solidReg = offset(solidNoTop, 0.05, false);
+      P.bridge = bridge;
+      if (bridge.length) P.bridgeLines = lineFill(bridge, W.solid, bridgeAngleOf(bridge, W));
+      P.topOnly = topOnly;
+      if (topOnly.length) {
+        P.topAng = S.topAngleMode === 'auto' ? longestAngle(topOnly) : (S.topAngleMode === 'fixed' ? S.topAngle : ang);
+        if (S.topPattern !== 'concentric') P.topLines = lineFill(topOnly, flowSpacing(W.top, h), P.topAng);
+        if (S.topPattern === 'monotonic') P.topReg = offset(topOnly, 0.05, false);
+        if (S.ironing !== 'none') {
+          var ir = offset(S.ironing === 'all' || li === nL - 1 ? topOnly : difference(topOnly, Unext), -S.ironingInset, false);
+          if (ir.length) P.irLines = lineFill(ir, S.ironingSpacing, P.topAng + 90);
+        }
+      }
+      P.sparse = [];
+      if (sparse.length || (N > 1 && combo && combo.c.length)) {
+        if (N > 1 && !first && combo) {
+          var own = difference(sparse, combo.c);
+          if (own.length) P.sparse.push({ region: own, hMul: 0 });
+          if (li === combo.end) {
+            var cc = intersect(combo.c, big);
+            if (cc.length) P.sparse.push({ region: cc, hMul: combo.end - combo.start + 1 });
+          }
+        } else if (sparse.length) P.sparse.push({ region: sparse, hMul: 0 });
+      }
+      var joinable = S.infillJoin && ['helix', 'golden', 'speed', 'rectilinear'].indexOf(S.infillPattern) >= 0;
+      P.sparse.forEach(function (it) { it.lines = sparseLines(it.region, it.hMul || 1, li, z, S, W, first); if (joinable) it.reg = offset(it.region, 0.05, false); });
+      return P;
+    });
+  }
+  // Duvarları geçmeden dolaşma için katmanın bölgesi (parça içi) ve yönlendirme düğüm bölgesi
+  function combRegions(outlines, li, W) {
+    var reg = [], nodes = [];
+    outlines.forEach(function (o) {
+      var wo0 = li === 0 ? W.first : W.outer;
+      reg = reg.concat(offset(o, -wo0 / 2 + 0.05, false));
+      nodes = nodes.concat(offset(o, -wo0 * 1.1, false));
+    });
+    return reg.length ? { reg: union(reg), nodes: union(nodes) } : null;
+  }
+  // birleştirilmiş dolgu (N katmanda bir) grubu: emitPart ile aynı kurallar
+  function comboFor(p, li, nL, S) {
+    var N = S.adaptiveActive ? 1 : Math.max(1, Math.min(4, S.infillEvery | 0));
+    if (!(N > 1 && li > 0)) return null;
+    var gs = 1 + Math.floor((li - 1) / N) * N, ge = Math.min(nL - 1, gs + N - 1);
+    p.combo = p.combo || {};
+    if (!p.combo[gs]) {
+      var c = p.regions[gs].sparse;
+      for (var k = gs + 1; k <= ge && c.length; k++) c = intersect(c, p.regions[k].sparse);
+      p.combo[gs] = { start: gs, end: ge, c: ge > gs ? opening(c, S.W.sparse * 2) : [] };
+    }
+    return p.combo[gs];
   }
 
   // ---------------------------------------------------------------- 3) destekler
@@ -1119,9 +1413,9 @@
       polys.forEach(function (p) { extrudePath(p, speed, width, height, type, accel, flow); });
     }
     // Seyrek dolgu çizgilerini tek hatta bağla: komşu çizgilerin uçları arasındaki bağlantı bölge içinde kalıyorsa
-    function joinInRegion(lines, region, maxGap) {
+    function joinInRegion(lines, region, maxGap, preReg) {
       var ordered = orderLines(lines, [pos.x, pos.y]);
-      region = offset(region, 0.05, false);
+      region = preReg || offset(region, 0.05, false);
       var polys = [], poly = null;
       for (var i = 0; i < ordered.length; i++) {
         var s2 = ordered[i];
@@ -1136,12 +1430,10 @@
       if (poly) polys.push(poly);
       return polys;
     }
-    function connectorInside(a, b, region) {
-      var seg = [[{ X: Math.round(a[0] * SCALE), Y: Math.round(a[1] * SCALE) }, { X: Math.round(b[0] * SCALE), Y: Math.round(b[1] * SCALE) }]];
-      var c = clipOpen(seg, region);
-      var L = 0; c.forEach(function (p) { for (var k = 1; k < p.length; k++) L += Math.hypot(p[k][0] - p[k - 1][0], p[k][1] - p[k - 1][1]); });
-      return L >= Math.hypot(b[0] - a[0], b[1] - a[1]) * 0.98;
-    }
+    // Bağlantı çizgisi bölgenin içinde mi? Uçlar bölgenin içindedir (çizgi uçları, 0.05 mm dışa genişletilmiş bölge);
+    // o hâlde kenarlardan hiçbirini kesmiyorsa tamamen içeridedir. Kenarlar ızgarada tutulur: her bağlantı için
+    // ayrı bir Clipper işlemi yerine yalnızca yakındaki birkaç kenar denetlenir.
+    function connectorInside(a, b, region) { return !segCrossesRegion(a, b, region); }
     function emitLinesSeparate(lines, speed, width, height, type, accel) {
       orderLines(lines, [pos.x, pos.y]).forEach(function (s) { extrudePath(s, speed, width, height, type, accel, 1); });
     }
@@ -1159,18 +1451,19 @@
         extrudePath(loopFrom(paths[b], 'nearest', [pos.x, pos.y], bedCx), speed, width, height, type, accel, flow);
       }
     }
-    function surfaceFill(region, pattern, width, angle, speed, height, type, accel, flow) {
+    function surfaceFill(region, pattern, width, angle, speed, height, type, accel, flow, pre, preReg) {
       if (!region.length) return;
       var spc = flowSpacing(width, height);
-      if (pattern === 'concentric') emitLoops(concentricFill(region, spc), speed, width, height, type, accel, flow);
-      else if (pattern === 'monotonic') emitMonotonic(lineFill(region, spc, angle), region, spc, speed, width, height, type, accel, flow);
-      else emitLinesJoined(lineFill(region, spc, angle), speed, width, height, type, accel, flow);
+      if (pattern === 'concentric') { emitLoops(concentricFill(region, spc), speed, width, height, type, accel, flow); return; }
+      var lines = pre || lineFill(region, spc, angle);
+      if (pattern === 'monotonic') emitMonotonic(lines, region, spc, speed, width, height, type, accel, flow, preReg);
+      else emitLinesJoined(lines, speed, width, height, type, accel, flow);
     }
     // Monoton zikzak: satırlar sırayla (yüzey hep aynı yönde dolar), her satırda yön değişir,
     // komşu satırlar bölge içinde kalan kısa bağlantıyla birleştirilir. Boşta geri dönüş yok.
-    function emitMonotonic(lines, region, spc, speed, width, height, type, accel, flow) {
+    function emitMonotonic(lines, region, spc, speed, width, height, type, accel, flow, preReg) {
       if (!lines.length) return;
-      var reg = offset(region, 0.05, false);
+      var reg = preReg || offset(region, 0.05, false);
       var sorted = lines.slice().sort(function (a, b) { return a[4] - b[4] || a[5] - b[5]; });
       var rows = [];
       sorted.forEach(function (l) { var r = rows[rows.length - 1]; if (r && Math.abs(r.y - l[4]) < 2) r.items.push(l); else rows.push({ y: l[4], items: [l] }); });
@@ -1194,12 +1487,6 @@
         dir = -dir;
       });
       flush();
-    }
-    // Üst yüzey yönü (otomatik): en az çizgi = en uzun çizgiler = en az çizgi ucu
-    function longestAngle(region) {
-      var best = 0, bestN = Infinity;
-      for (var a = 0; a < 180; a += 15) { var n = lineFill(region, 2, a).length; if (n < bestN) { bestN = n; best = a; } }
-      return best;
     }
     function fanPct(li) {
       var F = fil();
@@ -1275,10 +1562,16 @@
       pushBlock(fils[from].endGcode);
       var zl = pos.z + S.toolChangeLift;
       out.push('; ---- filament change T' + from + ' -> T' + to + ' ----');
+      // yıkama hacmi: yuva çifti matrisi (renklere göre) varsa ondan, yoksa sabit hacim × filament çarpanı
+      var flushVol = job.flush && job.flush[from] && job.flush[from][to] !== undefined ? +job.flush[from][to]
+        : S.purgeVolume * num(fils[to].purgeMultiplier, 1);
+      var dia = num(fils[to].filamentDiameter, 1.75);
       pushBlock(S.changeFilamentGcode, {
         current_tool: from, next_tool: to, next_temp: li === 0 ? fils[to].nozzleTempFirst : fils[to].nozzleTemp,
         z: f3(pos.z), z_lift: f3(zl), layer: li,
+        flush_volume: Math.round(flushVol), flush_length: f3(flushVol / (Math.PI * dia * dia / 4)),
       });
+      out.push('; flush_volume = ' + Math.round(flushVol) + ' mm3 (T' + from + ' -> T' + to + ')');
       extruder = to;
       retracted = false; curF = 0;
       var t = li === 0 ? fils[to].nozzleTempFirst : fils[to].nozzleTemp;
@@ -1290,7 +1583,7 @@
       stats.toolChanges++;
       stats.time += S.toolChangeTime;
       applyLayerFans(li);
-      towerLayer(li, S.purgeVolume * num(fils[to].purgeMultiplier, 1));
+      towerLayer(li, flushVol);
       return true;
     }
 
@@ -1303,14 +1596,9 @@
       layerIndex.push(preview.length / PV);
       comb = null;
       if (S.avoidCrossingWalls && !spiral) {
-        var reg = [], nodes = [];
-        parts.forEach(function (p) {
-          var r0 = p.regions[li]; if (!r0 || !r0.outline.length) return;
-          var wo0 = li === 0 ? W.first : W.outer;
-          reg = reg.concat(offset(r0.outline, -wo0 / 2 + 0.05, false));
-          nodes = nodes.concat(offset(r0.outline, -wo0 * 1.1, false));
-        });
-        if (reg.length) comb = combContext(union(reg), union(nodes));
+        var cr = job.combPre && job.combPre[li] !== undefined ? job.combPre[li]
+          : combRegions(parts.map(function (p) { var r0 = p.regions[li]; return r0 && r0.outline.length ? r0.outline : null; }).filter(Boolean), li, W);
+        if (cr) comb = combContext(cr.reg, cr.nodes);
       }
 
       out.push(';LAYER_CHANGE', ';Z:' + f3(Ly.z), ';HEIGHT:' + f3(h), ';LAYER:' + li);
@@ -1398,22 +1686,13 @@
       function emitPart(p) {
         var r = p.regions[li];
         partFlow = p.flowMul || 1; // akış kalibrasyonu: parça başına akış çarpanı
-        var N = S.adaptiveActive ? 1 : Math.max(1, Math.min(4, S.infillEvery | 0));
-        var combo = null;
-        if (N > 1 && li > 0) {
-          var gs = 1 + Math.floor((li - 1) / N) * N, ge = Math.min(nL - 1, gs + N - 1);
-          p.combo = p.combo || {};
-          if (!p.combo[gs]) {
-            var c = p.regions[gs].sparse;
-            for (var k = gs + 1; k <= ge && c.length; k++) c = intersect(c, p.regions[k].sparse);
-            p.combo[gs] = { start: gs, end: ge, c: ge > gs ? opening(c, W.sparse * 2) : [] };
-          }
-          combo = p.combo[gs];
-        }
+        // katman planı: paralel dilimlemede önceden hazırdır; yoksa burada bir kez hesaplanır (en kısa katman süresi tekrarında yeniden kullanılır)
+        p.plans = p.plans || [];
+        var plan = p.plans[li];
+        if (!plan) plan = p.plans[li] = planPart(r, li, nL, S, h, Ly.z, spiral, comboFor(p, li, nL, S), job.U[li + 1] || []);
         if (S.labelObjects) out.push('EXCLUDE_OBJECT_START NAME=' + p.label);
-        islandsOf(r.outline).forEach(function (isl) {
-          var big = offset(isl, 0.01, false);
-          var wallSets = r.walls.map(function (wp) { return intersect(wp, big); });
+        plan.forEach(function (P) {
+          var wallSets = P.wallSets;
           var wo = first ? W.first : W.outer, wi = first ? W.first : W.inner;
           if (spiral) { emitSpiral(wallSets[0] || [], wo); return; }
           // "bir ters bir düz": tek katmanlarda duvar yönü ters; 'order' modunda ayrıca önce dolgu, sonra duvarlar ters sırada
@@ -1429,44 +1708,27 @@
           if (fillFirst) emitWalls(true);
           wallRev = false;
           function emitFills() {
-          var solid = intersect(r.solid, big), top = intersect(r.top, big), sparse = intersect(r.sparse, big), bridge = intersect(r.bridge, big);
-          var topOnly = intersect(top, solid);
-          var solidNoTop = difference(solid, topOnly);
-          var ang = (li % 2 === 0) ? S.solidAngle : S.solidAngle + 90;
-          var ws = first ? W.first : W.solid;
-          if (solidNoTop.length) {
-            out.push(first ? ';TYPE:Bottom surface' : ';TYPE:Internal solid infill');
-            surfaceFill(solidNoTop, first ? S.bottomPattern : 'lines', ws, ang, spd(first ? S.firstLayerInfillSpeed : S.solidInfillSpeed), h, T.SOLID, first ? S.accelFirst : S.accelInfill, 1);
-          }
-          if (bridge.length) {
-            out.push(';TYPE:Bridge');
-            var bf = fil();
-            setFan(0, num(bf.bridgeFan, 100));
-            emitLinesJoined(lineFill(bridge, W.solid, bridgeAngle(bridge)), S.bridgeSpeed, W.solid, h, T.BRIDGE, S.accelInfill, S.bridgeFlow);
-            setFan(0, fanPct(li));
-          }
-          if (topOnly.length) {
-            out.push(';TYPE:Top surface');
-            var topAng = S.topAngleMode === 'auto' ? longestAngle(topOnly) : (S.topAngleMode === 'fixed' ? S.topAngle : ang);
-            surfaceFill(topOnly, S.topPattern, W.top, topAng, spd(S.topSurfaceSpeed), h, T.TOP, S.accelTop, S.topFlow);
-            if (S.ironing !== 'none') {
-              var ir = offset(S.ironing === 'all' || li === nL - 1 ? topOnly : difference(topOnly, job.U[li + 1]), -S.ironingInset, false);
-              if (ir.length) {
+            var ws = first ? W.first : W.solid;
+            if (P.solidNoTop.length) {
+              out.push(first ? ';TYPE:Bottom surface' : ';TYPE:Internal solid infill');
+              surfaceFill(P.solidNoTop, first ? S.bottomPattern : 'lines', ws, P.ang, spd(first ? S.firstLayerInfillSpeed : S.solidInfillSpeed), h, T.SOLID, first ? S.accelFirst : S.accelInfill, 1, P.solidLines, P.solidReg);
+            }
+            if (P.bridge.length) {
+              out.push(';TYPE:Bridge');
+              var bf = fil();
+              setFan(0, num(bf.bridgeFan, 100));
+              emitLinesJoined(P.bridgeLines, S.bridgeSpeed, W.solid, h, T.BRIDGE, S.accelInfill, S.bridgeFlow);
+              setFan(0, fanPct(li));
+            }
+            if (P.topOnly.length) {
+              out.push(';TYPE:Top surface');
+              surfaceFill(P.topOnly, S.topPattern, W.top, P.topAng, spd(S.topSurfaceSpeed), h, T.TOP, S.accelTop, S.topFlow, P.topLines, P.topReg);
+              if (P.irLines) {
                 out.push(';TYPE:Ironing');
-                emitLinesJoined(lineFill(ir, S.ironingSpacing, topAng + 90), S.ironingSpeed, W.top, h, T.IRON, S.accelTop, S.ironingFlow / 100);
+                emitLinesJoined(P.irLines, S.ironingSpeed, W.top, h, T.IRON, S.accelTop, S.ironingFlow / 100);
               }
             }
-          }
-          if (sparse.length || (N > 1 && combo && combo.c.length)) {
-            if (N > 1 && !first && combo) {
-              var own = difference(sparse, combo.c);
-              if (own.length) { out.push(';TYPE:Sparse infill'); emitSparse(own); }
-              if (li === combo.end) {
-                var cc = intersect(combo.c, big);
-                if (cc.length) { out.push(';TYPE:Sparse infill'); emitSparse(cc, combo.end - combo.start + 1); }
-              }
-            } else if (sparse.length) { out.push(';TYPE:Sparse infill'); emitSparse(sparse); }
-          }
+            P.sparse.forEach(function (it) { out.push(';TYPE:Sparse infill'); emitSparse(it.region, it.hMul || undefined, it.lines, it.reg); });
           }
         });
         if (r.gaps && r.gaps.length) {
@@ -1475,17 +1737,6 @@
         }
         partFlow = 1;
         if (S.labelObjects) out.push('EXCLUDE_OBJECT_END NAME=' + p.label);
-      }
-      function bridgeAngle(region) {
-        // köprüyü en kısa açıklık yönünde at: dört açıyı dene, en kısa ortalama çizgiyi seç
-        var best = 0, bestLen = Infinity;
-        [0, 45, 90, 135].forEach(function (a) {
-          var ls = lineFill(region, W.solid * 3, a);
-          if (!ls.length) return;
-          var tot = 0; ls.forEach(function (l) { tot += Math.hypot(l[2] - l[0], l[3] - l[1]); });
-          if (tot / ls.length < bestLen) { bestLen = tot / ls.length; best = a; }
-        });
-        return best;
       }
       // Çıkıntı sınıfı: 0 = alttaki katman tarafından taşınıyor, 1 = kısmen, 2 = havada
       var ovh = null;
@@ -1600,22 +1851,16 @@
         pos.z = z0;
         extrudePath(zpts, calibSpeed || S.outerWallSpeed, w, h, T.OUTER, S.accelOuterWall, 1, true);
       }
-      function emitSparse(region, hMul) {
+      function emitSparse(region, hMul, pre, preReg) {
         var hh = h * (hMul || 1);
         var wsp = first ? W.first : W.sparse;
         var d = S.infillDensity / 100;
         var sp = spd(first ? S.firstLayerInfillSpeed : S.sparseInfillSpeed);
         var ac = first ? S.accelFirst : S.accelInfill;
-        var A = S.infillAngle;
         var pat = S.infillPattern;
-        var gi = Math.floor(li / (hMul || 1)); // katman grubu (birleştirilmiş dolguda yön değişimi için)
-        var single = null; // tek yönlü desenler: açı
-        if (pat === 'helix') single = A + gi * S.helixStep;
-        else if (pat === 'golden') single = A + gi * 137.508;
-        else if (pat === 'speed') single = speedAngles(region, wsp / d)[gi % 2];
-        if (single !== null) {
-          var ls = lineFill(region, wsp / d, single % 180);
-          var polys = S.infillJoin ? joinInRegion(ls, region, (wsp / d) * 2.5) : orderLines(ls, [pos.x, pos.y]);
+        var ls = pre !== undefined ? pre : sparseLines(region, hMul || 1, li, Ly.z, S, W, first);
+        if (pat === 'helix' || pat === 'golden' || pat === 'speed') {
+          var polys = S.infillJoin ? joinInRegion(ls, region, (wsp / d) * 2.5, preReg) : orderLines(ls, [pos.x, pos.y]);
           polys.forEach(function (p) { extrudePath(p, sp, wsp, hh, T.SPARSE, ac, 1); });
           return;
         }
@@ -1623,38 +1868,12 @@
           orderPolylines(gyroidFill(region, wsp / d, Ly.z), [pos.x, pos.y]).forEach(function (p) { extrudePath(p, sp, wsp, hh, T.SPARSE, ac, 1); });
         } else if (pat === 'concentric') {
           emitLoops(concentricFill(region, wsp / d), sp, wsp, hh, T.SPARSE, ac, 1);
-        } else if (pat === 'grid') {
-          var s2 = 2 * wsp / d;
-          emitLinesSeparate(lineFill(region, s2, A).concat(lineFill(region, s2, A + 90)), sp, wsp, hh, T.SPARSE, ac);
-        } else if (pat === 'triangles') {
-          var s3 = 3 * wsp / d;
-          emitLinesSeparate(lineFill(region, s3, A).concat(lineFill(region, s3, A + 60), lineFill(region, s3, A - 60)), sp, wsp, hh, T.SPARSE, ac);
-        } else if (pat === 'cubic') {
-          // 3 yönlü, z ile kayan çizgiler: kübik dolguya yakın bir yapı
-          var s4 = 3 * wsp / d;
-          var shift = (Ly.z % s4) / Math.SQRT2;
-          var mk = function (a, sh) { return lineFill(region.map(function (pth) { return pth.map(function (q) { return { X: q.X + Math.round(sh * SCALE), Y: q.Y }; }); }), s4, a)
-            .map(function (l) { return [l[0] - sh, l[1], l[2] - sh, l[3], l[4], l[5]]; }); };
-          emitLinesSeparate(mk(A, shift).concat(mk(A + 60, -shift), mk(A - 60, shift * 0.5)), sp, wsp, hh, T.SPARSE, ac);
-        } else { // rectilinear
-          var rl = lineFill(region, wsp / d, gi % 2 ? A : A + 90);
-          if (S.infillJoin) joinInRegion(rl, region, (wsp / d) * 2.5).forEach(function (p) { extrudePath(p, sp, wsp, hh, T.SPARSE, ac, 1); });
-          else emitLinesJoined(rl, sp, wsp, hh, T.SPARSE, ac, 1);
+        } else if (pat === 'grid' || pat === 'triangles' || pat === 'cubic') {
+          emitLinesSeparate(ls, sp, wsp, hh, T.SPARSE, ac);
+        } else { // doğrusal
+          if (S.infillJoin) joinInRegion(ls, region, (wsp / d) * 2.5, preReg).forEach(function (p) { extrudePath(p, sp, wsp, hh, T.SPARSE, ac, 1); });
+          else emitLinesJoined(ls, sp, wsp, hh, T.SPARSE, ac, 1);
         }
-      }
-      // Hızlı desen: aralarında en az 40° olan ve toplamda en az (yani en uzun) çizgiyi veren iki yön.
-      // İnce duvarda iki yön de duvar boyunca uzanır; yuvarlak bölgede 90° farklı iki yön seçilir.
-      function speedAngles(region, spacing) {
-        var cnt = [];
-        for (var a = 0; a < 180; a += 15) cnt.push([a, lineFill(region, spacing, a).length]);
-        var best = [0, 90], bestC = Infinity, bestSep = 0;
-        for (var i = 0; i < cnt.length; i++) for (var j = i + 1; j < cnt.length; j++) {
-          var sep = Math.min(cnt[j][0] - cnt[i][0], 180 - (cnt[j][0] - cnt[i][0]));
-          if (sep < 40) continue;
-          var c = cnt[i][1] + cnt[j][1];
-          if (c < bestC - 0.5 || (Math.abs(c - bestC) <= 0.5 && sep > bestSep)) { bestC = c; best = [cnt[i][0], cnt[j][0]]; bestSep = sep; }
-        }
-        return best;
       }
       function emitSupport() {
         var ws = first ? W.first : W.support;
@@ -1698,7 +1917,7 @@
     // Başlık bloğu: Moonraker/Fluidd dilimleyiciyi "; generated by AD SÜRÜM on TARİH at SAAT" satırından tanır
     var now = new Date(), p2 = function (n) { return (n < 10 ? '0' : '') + n; };
     header.push('; HEADER_BLOCK_START');
-    header.push('; generated by K1MaxDilimleyici 2.14 on ' + now.getFullYear() + '-' + p2(now.getMonth() + 1) + '-' + p2(now.getDate()) +
+    header.push('; generated by K1MaxDilimleyici 2.15 on ' + now.getFullYear() + '-' + p2(now.getMonth() + 1) + '-' + p2(now.getDate()) +
       ' at ' + p2(now.getHours()) + ':' + p2(now.getMinutes()) + ':' + p2(now.getSeconds()));
     header.push('; total layer number: ' + nL);
     header.push('; HEADER_BLOCK_END', '');
@@ -1745,6 +1964,24 @@
 
   // ---------------------------------------------------------------- ana giriş
   function slice(job, progress) {
+    var g = sliceGen(job, progress), r = g.next();
+    while (!r.done) { var q = r.value; if (q.kind === 'regions') q.parts.forEach(function (p) { processPart(p, q.layers, q.S, q.U); }); r = g.next(); }
+    return r.value;
+  }
+  // Çok çekirdekli dilimleme: pool = { size, run(görevler) → Promise<sonuçlar> } (görevler runTask ile çözülür)
+  function sliceParallel(job, progress, pool) {
+    progress = progress || function () {};
+    var g = sliceGen(job, progress), r = g.next();
+    if (r.done) return Promise.resolve(r.value);
+    var q = r.value, chain = Promise.resolve();
+    q.parts.forEach(function (p) { chain = chain.then(function () { return processPartParallel(p, q.layers, q.S, q.U, pool, progress, p.name); }); });
+    return chain.then(function () {
+      var r2 = g.next();
+      if (r2.done) return r2.value;
+      return plansParallel(r2.value, pool, progress).then(function () { var r3 = g.next(); while (!r3.done) r3 = g.next(); return r3.value; });
+    });
+  }
+  function* sliceGen(job, progress) {
     progress = progress || function () {};
     var S = Object.assign({}, job.S);
     var lw = S.lineWidth;
@@ -1760,6 +1997,7 @@
     if (!parts.length) throw new Error('Dilimlenecek model yok.');
     if (S.spiralVase && parts.length > 1) throw new Error('Vazo modu yalnızca tek parçalı modellerde çalışır.');
     var maxZ = Math.max.apply(null, parts.map(function (p) { return p.mesh.maxZ; }));
+    RES = Math.max(0, num(S.resolution, 0.0125));
     S.adaptiveActive = !!S.adaptiveLayers && !S.spiralVase && !job.calib;
     var layers = S.adaptiveActive ? makeAdaptiveLayers(S, parts, maxZ) : makeLayers(S, maxZ);
     S.spiralStart = Math.max(S.bottomLayers, 1);
@@ -1787,8 +2025,9 @@
       parts.forEach(function (p) { all = all.concat(p.outline[li]); });
       U.push(union(all));
     }
+    // bölgeler: eşzamanlı sürüm burada hesaplar, paralel sürüm (sliceParallel) yardımcı iş parçacıklarına dağıtır
+    yield { kind: 'regions', parts: parts, layers: layers, S: S, U: U };
     parts.forEach(function (p, i) {
-      processPart(p, layers, S, U);
       var bb = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
       p.outline.forEach(function (o) { if (o.length) { var b = bboxOf(o); bb.minX = Math.min(bb.minX, b.minX / SCALE); bb.minY = Math.min(bb.minY, b.minY / SCALE); bb.maxX = Math.max(bb.maxX, b.maxX / SCALE); bb.maxY = Math.max(bb.maxY, b.maxY / SCALE); } });
       p.bbox = bb;
@@ -1821,7 +2060,9 @@
         here.sort(function (a, b) { return (a === curE ? -1 : 0) - (b === curE ? -1 : 0) || a - b; });
         here.forEach(function (sl) { if (sl !== curE) { lastChange = li; curE = sl; } });
       }
-      var size = Math.max(S.towerWidth, Math.sqrt(S.purgeVolume * 1.2 / S.layerHeight));
+      var maxFlush = S.purgeVolume;
+      if (job.flush) job.flush.forEach(function (row) { (row || []).forEach(function (v) { if (+v > maxFlush) maxFlush = +v; }); });
+      var size = Math.max(S.towerWidth, Math.sqrt(maxFlush * 1.2 / S.layerHeight));
       var mb = bboxOf(U.reduce(function (a, b) { return a.concat(b); }, []));
       var tx = S.towerX, ty = S.towerY;
       if (S.towerAuto) {
@@ -1837,8 +2078,10 @@
       U[0] = union(U[0].concat([rectPath(tx, ty, tx + size, ty + size)]));
     }
 
-    var job2 = { calib: job.calib || null, S: S, fils: fils, multi: multi, firstSlot: firstSlot, supportSlot: supportSlot, tower: tower, thumbnails: job.thumbnails || (job.thumbnail ? [job.thumbnail] : null),
+    var job2 = { calib: job.calib || null, flush: job.flush || null, S: S, fils: fils, multi: multi, firstSlot: firstSlot, supportSlot: supportSlot, tower: tower, thumbnails: job.thumbnails || (job.thumbnail ? [job.thumbnail] : null),
       U: U, skirt: skirtLoops(S, U[0], supports.sup[0].concat(supports.iface[0])) };
+    // katman planları: paralel sürüm burada yardımcılara hesaplatır; eşzamanlı sürüm G-code yazılırken hesaplar
+    yield { kind: 'plans', parts: parts, layers: layers, S: S, U: U, job: job2 };
     var res = buildGcode(job2, layers, parts, supports, progress);
     res.stats.usedSlots = Object.keys(used).map(Number);
     return res;
@@ -1867,7 +2110,7 @@
     return (hh ? hh + 'h ' : '') + mm + 'm ' + ss + 's';
   }
 
-  var api = { slice: slice, T: T, PV: PV, fmtTime: fmtTime };
+  var api = { slice: slice, sliceParallel: sliceParallel, runTask: runTask, T: T, PV: PV, fmtTime: fmtTime };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.K1Slicer = api;
 })(typeof self !== 'undefined' ? self : this);

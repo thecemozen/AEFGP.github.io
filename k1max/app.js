@@ -39,7 +39,7 @@ function toBlob(text, id) {
 }
 
 // ================================================================= durum ve profiller
-const APP_VERSION = '2.14';
+const APP_VERSION = '2.15';
 const FAST_PRESET = 'Hızlı baskı (uyarlanabilir 0.10–0.28)';
 let state = null;
 state = loadState();
@@ -82,7 +82,33 @@ function loadState() {
   fix('printer', s.printer); fix('process', s.process);
   while (s.slots.length < SLOT_COUNT) s.slots.push({ name: 'Genel PLA', color: SLOT_COLORS[s.slots.length], values: null });
   s.slots.forEach(sl => fix('filament', sl));
+  if (!s.flush || !Array.isArray(s.flush.m)) s.flush = { on: true, auto: true, mult: 1, m: null };
+  if (s.flush.auto || !s.flush.m) s.flush.m = autoFlush(s.slots);
   return s;
+}
+// ---------------- yıkama hacimleri (renk değişimi): yuva çifti başına mm³
+// Otomatik: koyudan açığa geçiş en çok, benzer renkler en az temizleme ister (Orca/Bambu yaklaşımına benzer)
+function colorLab(hex) {
+  const n = parseInt(String(hex || '#ffffff').replace('#', ''), 16);
+  const lin = (c) => { c /= 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+  const r = lin((n >> 16) & 255), g = lin((n >> 8) & 255), b = lin(n & 255);
+  const X = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047, Y = 0.2126 * r + 0.7152 * g + 0.0722 * b, Z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883;
+  const f = (t) => t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116;
+  return [116 * f(Y) - 16, 500 * (f(X) - f(Y)), 200 * (f(Y) - f(Z))];
+}
+function flushVolume(fromHex, toHex) {
+  const a = colorLab(fromHex), b = colorLab(toHex);
+  const dE = Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+  if (dE < 2) return 100;
+  const lighter = Math.max(0, b[0] - a[0]) / 100; // açığa geçiş: eski renk kolay görünür
+  return Math.round(Math.min(800, 120 + 380 * lighter + 180 * Math.min(1, dE / 100)) / 5) * 5;
+}
+function autoFlush(slots) { return slots.map(a => slots.map(b => (a === b ? 0 : flushVolume(a.color, b.color)))); }
+function renderFlushHint() {
+  const F = state.flush, used = [...new Set(parts.map(p => p.slot))];
+  if (!F.on) { $('flushHint').textContent = `Kapalı: sabit ${state.process.values.purgeVolume} mm³`; return; }
+  const vals = []; F.m.forEach((row, i) => row.forEach((v, j) => { if (i !== j && (used.length < 2 || (used.includes(i) && used.includes(j)))) vals.push(v * F.mult); }));
+  $('flushHint').textContent = vals.length ? `${Math.round(Math.min(...vals))}–${Math.round(Math.max(...vals))} mm³${F.mult !== 1 ? ' (×' + F.mult + ')' : ''}${F.auto ? ' · otomatik' : ''}` : '';
 }
 function saveState() {
   try { store.set(STORE_KEY, JSON.stringify(state)); } catch (e) { /* yok say */ }
@@ -348,7 +374,7 @@ function renderQuick() {
     const row = document.createElement('div'); row.className = 'slot';
     const n = document.createElement('b'); n.textContent = i + 1;
     const col = document.createElement('input'); col.type = 'color'; col.value = sl.color;
-    col.oninput = () => { sl.color = col.value; saveState(); recolorParts(); renderParts(); refreshPreviewColors(); };
+    col.oninput = () => { sl.color = col.value; if (state.flush.auto) state.flush.m = autoFlush(state.slots); saveState(); recolorParts(); renderParts(); refreshPreviewColors(); renderFlushHint(); };
     const sel = document.createElement('select');
     fillPresetSelect(sel, 'filament', sl.name);
     sel.onchange = () => { loadPreset('filament', sel.value, sl); if (state.cat === 'filament') renderSettings(); renderQuick(); invalidate(); };
@@ -357,7 +383,36 @@ function renderQuick() {
     list.appendChild(row);
   });
   renderParts();
+  renderFlushHint();
 }
+$('flushBtn').addEventListener('click', async () => {
+  const F = state.flush, n = state.slots.length;
+  const sw = (i) => `<span class="sw" style="background:${state.slots[i].color}"></span>${i + 1}`;
+  let html = '<p class="hint">Satır: çıkan renk, sütun: giren renk. Değer mm³ (kulede basılacak hacim). Koyudan açığa geçiş daha fazla ister.</p><table class="flush"><tr><th>↓ / →</th>';
+  for (let j = 0; j < n; j++) html += `<th>${sw(j)}</th>`;
+  html += '</tr>';
+  for (let i = 0; i < n; i++) {
+    html += `<tr><th>${sw(i)}</th>`;
+    for (let j = 0; j < n; j++) html += i === j ? '<td class="self">–</td>' : `<td><input type="number" min="0" max="2000" step="5" data-fi="${i}" data-fj="${j}" value="${F.m[i][j]}"></td>`;
+    html += '</tr>';
+  }
+  html += `</table><label class="row"><span>Çarpan</span><input type="number" id="flushMult" min="0.2" max="4" step="0.1" value="${F.mult}"></label>` +
+    `<label class="chk"><input type="checkbox" id="flushAuto"${F.auto ? ' checked' : ''}> Renk değişince otomatik hesapla</label>` +
+    `<label class="chk"><input type="checkbox" id="flushOn"${F.on ? ' checked' : ''}> Tabloyu kullan (kapalıysa sabit hacim)</label>` +
+    '<div class="btn-row"><button class="btn small" id="flushCalc" type="button">Renklere göre hesapla</button></div>';
+  const ok = await dialog('Yıkama hacimleri', html, [[false, 'Vazgeç'], [true, 'Kaydet', 'primary']], () => {
+    $('flushCalc').onclick = () => { const m = autoFlush(state.slots); document.querySelectorAll('[data-fi]').forEach(inp => { inp.value = m[+inp.dataset.fi][+inp.dataset.fj]; }); };
+    document.querySelectorAll('[data-fi]').forEach(inp => inp.addEventListener('input', () => { $('flushAuto').checked = false; }));
+  });
+  if (!ok) return;
+  document.querySelectorAll('[data-fi]').forEach(inp => { F.m[+inp.dataset.fi][+inp.dataset.fj] = Math.max(0, Math.min(2000, Math.round(+inp.value || 0))); });
+  F.mult = Math.max(0.2, Math.min(4, +$('flushMult').value || 1));
+  F.auto = $('flushAuto').checked; F.on = $('flushOn').checked;
+  if (F.auto) F.m = autoFlush(state.slots);
+  saveState(); renderFlushHint(); invalidate();
+  toast('Yıkama hacimleri kaydedildi.');
+});
+
 $('qPrinter').addEventListener('change', async () => {
   if (isModified('printer', state.printer) && !(await confirmDlg('Kaydedilmemiş değişiklikler', 'Yazıcı profilindeki değişiklikler kaybolacak.', 'Değiştir'))) { renderQuick(); return; }
   loadPreset('printer', $('qPrinter').value, state.printer); renderAll(); buildBed(); placeAll();
@@ -376,7 +431,7 @@ $('qFast').addEventListener('click', async () => {
 
 // ================================================================= 3B sahne
 const wrap = $('canvasWrap');
-const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 wrap.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
@@ -430,7 +485,7 @@ function gridCanvasTexture(bx, by) {
   // K1 Max'in orijinal tabla dokusu (logo, kenar işaretleri): ızgaranın üstüne
   if (bx === 300 && by === 300) {
     const img = new Image();
-    img.onload = () => { g.drawImage(img, 0, 0, cv.width, cv.height); t.needsUpdate = true; };
+    img.onload = () => { g.drawImage(img, 0, 0, cv.width, cv.height); t.needsUpdate = true; wake(3); };
     img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(K1MAX_BED_TEXTURE_SVG);
   }
   return t;
@@ -439,7 +494,7 @@ function bedTexture(bx, by, cb) {
   let custom = null;
   custom = store.get(BED_TEX_KEY);
   if (custom) {
-    new THREE.TextureLoader().load(custom, t => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = renderer.capabilities.getMaxAnisotropy(); cb(t, true); },
+    new THREE.TextureLoader().load(custom, t => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = renderer.capabilities.getMaxAnisotropy(); cb(t, true); wake(3); },
       undefined, () => cb(gridCanvasTexture(bx, by), false));
   } else cb(gridCanvasTexture(bx, by), false);
 }
@@ -465,7 +520,8 @@ function buildBed() {
   const top = new THREE.Mesh(new THREE.PlaneGeometry(B.x, B.y),
     new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
   top.position.set(B.x / 2, B.y / 2, 0.01);
-  top.renderOrder = 1;
+  top.renderOrder = 1; top.userData.bedTop = true;
+  try { top.visible = viewOpt.bedTex; } catch (e) { /* görünüm seçenekleri henüz yüklenmedi */ }
   bedGroup.add(top);
   bedTexture(B.x, B.y, (t, custom) => {
     gridTexture = t; top.material.map = t;
@@ -492,11 +548,24 @@ function resize() {
   renderer.setSize(w, h, false);
   camera.aspect = w / h; camera.updateProjectionMatrix();
 }
-new ResizeObserver(resize).observe(wrap);
+new ResizeObserver(() => { resize(); wake(3); }).observe(wrap);
+// Yalnızca bir şey değişince çiz: büyük modellerde ekran kartı boşuna sürekli çalışmasın (pil ve akıcılık)
+let renderBudget = 3;
+function wake(n = 2) { renderBudget = Math.max(renderBudget, n); }
+controls.addEventListener('change', () => wake(2));
+['pointerdown', 'pointermove', 'pointerup', 'wheel', 'keydown', 'input', 'change', 'click'].forEach(t => document.addEventListener(t, () => wake(3), true));
+window.addEventListener('resize', () => wake(3));
+setInterval(() => wake(1), 1000); // güvenlik: arka planda değişen bir şey kaçarsa saniyede bir tazele
 renderer.setAnimationLoop((now) => {
   stepPlayback(now);
   if (head && head.visible) { const sc = Math.min(6, Math.max(1, camera.position.distanceTo(head.position) / 120)); head.scale.setScalar(sc); }
-  controls.update(); renderer.render(scene, camera);
+  if (controls.update()) wake(2);
+  if (playback.on) wake(1);
+  if (renderBudget <= 0) return;
+  renderBudget--;
+  syncOrtho();
+  renderer.render(scene, activeCam());
+  updateLabels();
 });
 
 function setView(v) {
@@ -544,11 +613,50 @@ function worldGeom(p) {
   g.scale(o.sx, o.sy, o.sz); g.rotateZ(o.rotZ); g.translate(o.x, o.y, 0);
   return g;
 }
-// nesnenin tabladaki kaplama dikdörtgeni (ölçek ve dönüş sonrası)
+// Nesnenin şekil özeti (önbellekli): yerel XY dışbükey örtüsü ve Z aralığı. Geometri değişmedikçe yeniden hesaplanmaz;
+// taşıma/döndürme/ölçekte milyonlarca üçgeni kopyalamak yerine yalnızca örtünün birkaç noktası dönüştürülür.
+function hull2d(P) {
+  P.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cr = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lo = [], up = [];
+  for (const p of P) { while (lo.length >= 2 && cr(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); }
+  for (let i = P.length - 1; i >= 0; i--) { const p = P[i]; while (up.length >= 2 && cr(up[up.length - 2], up[up.length - 1], p) <= 0) up.pop(); up.push(p); }
+  lo.pop(); up.pop(); return lo.concat(up);
+}
+function objShape(o) {
+  const ps = objParts(o), key = ps.map(p => p.geom.id + ':' + p.geom.attributes.position.version).join(',');
+  if (o._shape && o._shape.key === key) return o._shape;
+  // Akl–Toussaint: 8 yöndeki uç noktaların sekizgeninin içindekiler örtüye giremez → çoğu nokta elenir
+  const ext = [[-Infinity], [-Infinity], [-Infinity], [-Infinity], [-Infinity], [-Infinity], [-Infinity], [-Infinity]];
+  const dirs = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];
+  let zmin = Infinity, zmax = -Infinity, tris = 0;
+  ps.forEach(p => {
+    const a = p.geom.attributes.position.array; tris += a.length / 9;
+    for (let i = 0; i < a.length; i += 3) {
+      const x = a[i], y = a[i + 1], z = a[i + 2];
+      if (z < zmin) zmin = z; if (z > zmax) zmax = z;
+      for (let k = 0; k < 8; k++) { const v = dirs[k][0] * x + dirs[k][1] * y; if (v > ext[k][0]) ext[k] = [v, x, y]; }
+    }
+  });
+  const oct = ext.map(e => [e[1], e[2]]);
+  const inside = (x, y) => { for (let k = 0; k < 8; k++) { const a = oct[k], b = oct[(k + 1) % 8]; if ((b[0] - a[0]) * (y - a[1]) - (b[1] - a[1]) * (x - a[0]) <= 0) return false; } return true; };
+  const cand = oct.slice(), seen = new Set();
+  ps.forEach(p => {
+    const a = p.geom.attributes.position.array;
+    for (let i = 0; i < a.length; i += 3) {
+      const x = a[i], y = a[i + 1]; if (inside(x, y)) continue;
+      const k = Math.round(x * 1000) + ',' + Math.round(y * 1000); if (seen.has(k)) continue; seen.add(k); cand.push([x, y]);
+    }
+  });
+  o._shape = { key, hull: hull2d(cand), zmin, zmax, tris };
+  return o._shape;
+}
+// nesnenin tabladaki kaplama kutusu (ölçek ve dönüş sonrası, nesne merkezine göre)
 function objFootprint(o) {
-  const b = new THREE.Box3();
-  objParts(o).forEach(p => { const g = p.geom.clone(); g.scale(o.sx, o.sy, o.sz); g.rotateZ(o.rotZ); g.computeBoundingBox(); b.union(g.boundingBox); });
-  return b; // nesne merkezine göre
+  const sh = objShape(o), c = Math.cos(o.rotZ), s = Math.sin(o.rotZ), b = new THREE.Box3();
+  sh.hull.forEach(([x, y]) => { const X = x * o.sx, Y = y * o.sy; b.expandByPoint(new THREE.Vector3(X * c - Y * s, X * s + Y * c, 0)); });
+  b.min.z = 0; b.max.z = (sh.zmax - sh.zmin) * o.sz;
+  return b;
 }
 // boş bir yer bul: tabla ortasından dışa doğru tara
 function placeFree(o, gap = 6) {
@@ -593,19 +701,24 @@ function addParts(list, replace, keepCalib, asObject) {
 }
 
 function placeAll() {
-  if (!parts.length) { $('modelInfo').textContent = 'Model yüklenmedi. STL ya da 3MF açın veya buraya sürükleyin.'; $('editHint').hidden = true; $('editTools').hidden = true; updateButtons(false); return; }
+  if (!parts.length) { $('modelInfo').textContent = 'Model yüklenmedi. STL ya da 3MF açın veya buraya sürükleyin.'; $('editHint').hidden = true; $('tb').hidden = true; $('tbPanel').hidden = true; updateButtons(false); return; }
   const B = bedSize(), all = new THREE.Box3();
   let tris = 0;
-  const objBox = new Map();
+  // Yerel geometri ekran kartına bir kez yüklenir; taşıma/döndürme/ölçek yalnızca nesne dönüşümünü değiştirir
   parts.forEach(p => {
-    const g = worldGeom(p); g.computeVertexNormals(); g.computeBoundingBox();
-    p.mesh.geometry.dispose(); p.mesh.geometry = g; p.mesh.position.set(0, 0, 0);
-    tris += g.attributes.position.count / 3;
-    all.union(g.boundingBox);
-    const ob = objBox.get(p.obj) || new THREE.Box3(); ob.union(g.boundingBox); objBox.set(p.obj, ob);
+    const g = p.geom, pa = g.attributes.position;
+    if (g.userData.nv !== pa.version) { g.computeVertexNormals(); g.computeBoundingBox(); g.computeBoundingSphere(); g.userData.nv = pa.version; }
+    if (p.mesh.geometry !== g) { const old = p.mesh.geometry; p.mesh.geometry = g; if (!parts.some(q => q.geom === old)) old.dispose(); }
+    const o = p.obj;
+    p.mesh.position.set(o.x, o.y, 0); p.mesh.rotation.set(0, 0, o.rotZ); p.mesh.scale.set(o.sx, o.sy, o.sz);
+    tris += pa.count / 3;
   });
   let fits = true;
-  objBox.forEach((b, o) => {
+  objects.forEach(o => {
+    if (!objParts(o).length) return;
+    const f = objFootprint(o);
+    const b = o.box = new THREE.Box3(new THREE.Vector3(o.x + f.min.x, o.y + f.min.y, 0), new THREE.Vector3(o.x + f.max.x, o.y + f.max.y, f.max.z));
+    all.union(b);
     const ok = b.min.x >= -0.01 && b.min.y >= -0.01 && b.max.x <= B.x + 0.01 && b.max.y <= B.y + 0.01 && b.max.z <= B.z;
     o.ok = ok; if (!ok) fits = false;
   });
@@ -615,14 +728,17 @@ function placeAll() {
     (fits ? '' : '<br><span class="err">Kırmızı nesne tablanın dışında ya da çok yüksek! Taşıyın veya küçültün.</span>');
   partsGroup.visible = $('showModel').checked || !result;
   $('editHint').hidden = !partsGroup.visible || !!selObj;
-  $('editTools').hidden = !partsGroup.visible;
+  $('tb').hidden = !partsGroup.visible;
+  if (!partsGroup.visible && tbPanel !== 'view') showPanel(null);
+  applyOverhangColors();
   renderEditTools();
   updateButtons(fits);
   scheduleAnalysis();
+  wake(3);
 }
 function focusModels() {
   const all = new THREE.Box3();
-  parts.forEach(p => { if (p.mesh.geometry.boundingBox) all.union(p.mesh.geometry.boundingBox); });
+  objects.forEach(o => { if (o.box) all.union(o.box); });
   if (all.isEmpty()) return;
   const c = all.getCenter(new THREE.Vector3()), sz = all.getSize(new THREE.Vector3());
   // hedefle birlikte kamerayı da kaydır: bakış yönü değişmesin (tepeden görünümde ters dönmesin)
@@ -686,11 +802,34 @@ $('objRot').addEventListener('change', () => { if (selObj) { selObj.rotZ = (+$('
   else selObj[['sx', 'sy', 'sz'][k]] = v;
   changed3d();
 }));
-// ---------------- önizlemedeki düzenleme çubuğu: derece derece döndürme, ortalama, yatırma
+// ---------------- 3B görünüm araç çubuğu (Orca benzeri) ve panelleri
+let tbPanel = null;
+// düzenlenen nesne: seçili nesne; tek nesne varsa o
+const editTarget = () => selObj || (objects.length === 1 ? objects[0] : null);
+function showPanel(name) {
+  tbPanel = tbPanel === name ? null : name;
+  document.querySelectorAll('#tb [data-panel]').forEach(b => b.classList.toggle('on', b.dataset.panel === tbPanel));
+  $('tbPanel').hidden = !tbPanel;
+  if (tbPanel) $('tbPanel').dataset.show = tbPanel;
+  renderEditTools();
+}
 function renderEditTools() {
-  const o = selObj || objects[0];
-  $('etName').textContent = selObj ? selObj.name : (objects.length > 1 ? `Tümü (${objects.length})` : 'Tümü');
-  if (document.activeElement !== $('etDeg')) $('etDeg').value = o ? Math.round(((o.rotZ * 180 / Math.PI) % 360 + 360) % 360) : 0;
+  const o = editTarget() || objects[0];
+  $('etName').textContent = selObj ? selObj.name : (objects.length > 1 ? (tbPanel === 'rot' ? `Tümü (${objects.length})` : 'Önce bir nesne seçin (tümü için döndürme kullanılabilir)') : (o ? o.name : ''));
+  const act = document.activeElement;
+  if (act !== $('etDeg')) $('etDeg').value = o ? Math.round(((o.rotZ * 180 / Math.PI) % 360 + 360) % 360) : 0;
+  const t = editTarget();
+  ['pmX', 'pmY', 'psU', 'psX', 'psY', 'psZ'].forEach(id => { $(id).disabled = !t; });
+  if (t) {
+    if (act !== $('pmX')) $('pmX').value = t.x.toFixed(1);
+    if (act !== $('pmY')) $('pmY').value = t.y.toFixed(1);
+    if (act !== $('psX')) $('psX').value = Math.round(t.sx * 100);
+    if (act !== $('psY')) $('psY').value = Math.round(t.sy * 100);
+    if (act !== $('psZ')) $('psZ').value = Math.round(t.sz * 100);
+    if (act !== $('psU')) $('psU').value = t.sx === t.sy && t.sy === t.sz ? Math.round(t.sx * 100) : '';
+    if (t.box) { const z = t.box.getSize(new THREE.Vector3()); $('psSize').textContent = `${z.x.toFixed(1)} × ${z.y.toFixed(1)} × ${z.z.toFixed(1)} mm`; }
+  }
+  ['tbDel', 'tbCopy', 'tbCut'].forEach(id => { $(id).disabled = !editTarget(); });
 }
 function rotateBy(deg) { targets().forEach(o => { o.rotZ += deg * Math.PI / 180; }); changed3d(); }
 // seçili nesneyi ya da tüm nesneleri (birlikte) tabla ortasına al
@@ -709,11 +848,98 @@ $('etDeg').addEventListener('change', () => {
   const v = (+$('etDeg').value || 0) * Math.PI / 180;
   targets().forEach(o => { o.rotZ = v; }); changed3d();
 });
-$('etCenter').addEventListener('click', centerTargets);
 $('centerAll').addEventListener('click', centerTargets);
-$('etFlat').addEventListener('click', () => $('layflat').click());
+// taşı / ölçekle panelleri
+['pmX', 'pmY'].forEach((id, k) => $(id).addEventListener('change', () => { const t = editTarget(); if (!t) return; t[k ? 'y' : 'x'] = +$(id).value || 0; changed3d(); }));
+$('psU').addEventListener('change', () => { const t = editTarget(); if (!t) return; const v = Math.max(1, +$('psU').value || 100) / 100; t.sx = t.sy = t.sz = v; changed3d(); });
+['psX', 'psY', 'psZ'].forEach((id, k) => $(id).addEventListener('change', () => { const t = editTarget(); if (!t) return; t[['sx', 'sy', 'sz'][k]] = Math.max(1, +$(id).value || 100) / 100; changed3d(); }));
+// araç düğmeleri: mevcut işlemleri çağırır
+const needSel = (fn) => () => { const t = editTarget(); if (!t) { toast('Önce bir nesneye dokunarak seçin.', true); return; } if (selObj !== t) select(t); fn(); };
+$('tbAdd').addEventListener('click', () => $('fileObj').click());
+$('tbDel').addEventListener('click', needSel(() => $('objDel').click()));
+$('tbArrange').addEventListener('click', () => $('arrange').click());
+$('tbFlat').addEventListener('click', () => $('layflat').click());
+$('tbCenter').addEventListener('click', centerTargets);
+$('tbCopy').addEventListener('click', needSel(() => $('objCopy').click()));
+$('tbCut').addEventListener('click', needSel(() => $('objCut').click()));
+$('tbSplit').addEventListener('click', () => $('split').click());
+document.querySelectorAll('#tb [data-panel]').forEach(b => b.addEventListener('click', () => showPanel(b.dataset.panel)));
+// telefonda araçlar gizli: "Düzenle" ile açılır/kapanır
+$('tbToggle').addEventListener('click', () => {
+  const open = !document.body.classList.contains('tbopen');
+  document.body.classList.toggle('tbopen', open);
+  $('tbToggle').setAttribute('aria-expanded', open);
+  $('tbToggle').textContent = open ? '✕ Kapat' : '✎ Düzenle';
+  if (!open) showPanel(null);
+});
 // çubuktaki dokunuşlar nesne seçimini / sürüklemeyi tetiklemesin
-['pointerdown', 'pointerup', 'click'].forEach(t => $('editTools').addEventListener(t, e => e.stopPropagation()));
+['tb', 'tbPanel', 'tbToggle'].forEach(id => ['pointerdown', 'pointerup', 'click'].forEach(t => $(id).addEventListener(t, e => e.stopPropagation())));
+
+// ---------------- görünüm seçenekleri
+const VIEW_KEY = 'k1max-view';
+const viewOpt = (() => { const d = { overhang: false, persp: true, axes: false, bedTex: true, labels: false }; try { return Object.assign(d, JSON.parse(store.get(VIEW_KEY) || '{}')); } catch (e) { return d; } })();
+document.querySelectorAll('[data-vo]').forEach(cb => {
+  cb.checked = !!viewOpt[cb.dataset.vo];
+  cb.addEventListener('change', () => { viewOpt[cb.dataset.vo] = cb.checked; try { store.set(VIEW_KEY, JSON.stringify(viewOpt)); } catch (e) { /* yok */ } applyViewOptions(); });
+});
+const axes = new THREE.AxesHelper(40); axes.position.set(0, 0, 0.3); axes.visible = false; scene.add(axes);
+const orthoCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.5, 5000); orthoCam.up.set(0, 0, 1);
+const activeCam = () => (viewOpt.persp ? camera : orthoCam);
+function syncOrtho() { // dik görünüm, perspektif kamerayı izler (hedefteki görüntü boyu aynı)
+  if (viewOpt.persp) return;
+  const d = camera.position.distanceTo(controls.target), hh = d * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+  orthoCam.left = -hh * camera.aspect; orthoCam.right = hh * camera.aspect; orthoCam.top = hh; orthoCam.bottom = -hh;
+  orthoCam.position.copy(camera.position); orthoCam.quaternion.copy(camera.quaternion); orthoCam.updateProjectionMatrix();
+}
+function applyViewOptions() {
+  axes.visible = !!viewOpt.axes;
+  if (bedGroup) bedGroup.traverse(m => { if (m.userData.bedTop) m.visible = !!viewOpt.bedTex; });
+  applyOverhangColors();
+  $('labels').innerHTML = '';
+  wake(3);
+}
+// çıkıntılar: destek eşiğinden yatık, aşağı bakan yüzler kırmızı (Z dönüşü yüz eğimini değiştirmez)
+function applyOverhangColors() {
+  const on = !!viewOpt.overhang && !result;
+  const lim = Math.cos((state.process.values.supportAngle || 30) * Math.PI / 180);
+  parts.forEach(p => {
+    const g = p.geom, mat = p.mesh.material;
+    if (on) {
+      const key = g.attributes.position.version + ':' + lim + ':' + p.obj.sz;
+      if (g.userData.ovKey !== key) {
+        const a = g.attributes.position.array, n = a.length / 3;
+        const col = g.attributes.color && g.attributes.color.count === n ? g.attributes.color : new THREE.BufferAttribute(new Float32Array(n * 3), 3);
+        const c = col.array;
+        for (let i = 0; i < a.length; i += 9) {
+          const ux = a[i + 3] - a[i], uy = a[i + 4] - a[i + 1], uz = a[i + 5] - a[i + 2], vx = a[i + 6] - a[i], vy = a[i + 7] - a[i + 1], vz = a[i + 8] - a[i + 2];
+          const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx, L = Math.hypot(nx, ny, nz) || 1;
+          const zmin = Math.min(a[i + 2], a[i + 5], a[i + 8]) * p.obj.sz;
+          const ov = nz / L < 0 && -nz / L > lim && zmin > 0.3;
+          for (let k = 0; k < 9; k += 3) { c[i + k] = 1; c[i + k + 1] = ov ? 0.18 : 1; c[i + k + 2] = ov ? 0.15 : 1; }
+        }
+        g.setAttribute('color', col); col.needsUpdate = true; g.userData.ovKey = key;
+      }
+    }
+    if (mat.vertexColors !== on) { mat.vertexColors = on; mat.needsUpdate = true; }
+  });
+}
+applyViewOptions();
+// nesne adları: her çizimde ekran konumuna taşınır
+function updateLabels() {
+  const box = $('labels');
+  if (!viewOpt.labels || !partsGroup.visible) { if (box.childElementCount) box.innerHTML = ''; return; }
+  while (box.childElementCount < objects.length) box.appendChild(document.createElement('span'));
+  while (box.childElementCount > objects.length) box.lastChild.remove();
+  const w = renderer.domElement.clientWidth, h = renderer.domElement.clientHeight, v = new THREE.Vector3();
+  objects.forEach((o, i) => {
+    const el = box.children[i];
+    if (!o.box) { el.hidden = true; return; }
+    v.set((o.box.min.x + o.box.max.x) / 2, (o.box.min.y + o.box.max.y) / 2, o.box.max.z + 2).project(activeCam());
+    el.hidden = v.z > 1;
+    el.style.left = ((v.x + 1) / 2 * w) + 'px'; el.style.top = ((1 - v.y) / 2 * h) + 'px';
+    el.textContent = o.name; el.style.outline = o === selObj ? '2px solid var(--accent)' : '';
+  });
+}
 
 $('objCenter').addEventListener('click', () => { if (!selObj) return; const B = bedSize(); selObj.x = B.x / 2; selObj.y = B.y / 2; changed3d(); });
 $('objDrop').addEventListener('click', () => select(null));
@@ -833,13 +1059,21 @@ function cutMesh(a, zc) {
 const picker = new THREE.Raycaster(), ndc = new THREE.Vector2(), bedPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
 let drag = null, tap = null;
 function setNdc(e) { const r = renderer.domElement.getBoundingClientRect(); ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1); }
-function bedPoint(e) { setNdc(e); picker.setFromCamera(ndc, camera); const p = new THREE.Vector3(); return picker.ray.intersectPlane(bedPlane, p) ? p : null; }
+function bedPoint(e) { setNdc(e); syncOrtho(); picker.setFromCamera(ndc, activeCam()); const p = new THREE.Vector3(); return picker.ray.intersectPlane(bedPlane, p) ? p : null; }
+// Seçim: küçük modellerde üçgen üçgen kesin test, büyüklerde (gecikme olmasın) nesne kutularıyla
+function pickObject() {
+  const total = parts.reduce((n, p) => n + p.geom.attributes.position.count / 3, 0);
+  if (total <= 400000) { const h = picker.intersectObjects(parts.map(p => p.mesh), false)[0]; return h ? parts.find(p => p.mesh === h.object).obj : null; }
+  let best = null, bd = Infinity; const v = new THREE.Vector3();
+  objects.forEach(o => { if (o.box && picker.ray.intersectBox(o.box, v)) { const d = v.distanceTo(picker.ray.origin); if (d < bd) { bd = d; best = o; } } });
+  return best;
+}
 wrap.addEventListener('pointerdown', (e) => {
   if (e.target !== renderer.domElement || !parts.length || !partsGroup.visible || e.button > 0) return;
-  setNdc(e); picker.setFromCamera(ndc, camera);
-  const hit = picker.intersectObjects(parts.map(p => p.mesh), false)[0];
-  if (!hit) { tap = { x: e.clientX, y: e.clientY }; return; }
-  const part = parts.find(p => p.mesh === hit.object), o = part.obj, bp = bedPoint(e);
+  setNdc(e); syncOrtho(); picker.setFromCamera(ndc, activeCam());
+  const o = pickObject();
+  if (!o) { tap = { x: e.clientX, y: e.clientY }; return; }
+  const bp = bedPoint(e);
   if (selObj !== o) select(o);
   drag = { o, start: bp, ox: o.x, oy: o.y, moved: false, id: e.pointerId, ox0: () => drag.ox, oy0: () => drag.oy };
   renderer.domElement.setPointerCapture(e.pointerId);
@@ -852,7 +1086,7 @@ wrap.addEventListener('pointermove', (e) => {
   if (!drag.moved && Math.hypot(dx, dy) < 0.5) return;
   drag.moved = true;
   drag.o.x = drag.ox + dx; drag.o.y = drag.oy + dy;
-  objParts(drag.o).forEach(p => p.mesh.position.set(drag.o.x - drag.ox0(), drag.o.y - drag.oy0(), 0));
+  objParts(drag.o).forEach(p => p.mesh.position.set(drag.o.x, drag.o.y, 0)); wake(2);
   e.stopPropagation();
 }, true);
 wrap.addEventListener('pointerup', (e) => {
@@ -968,13 +1202,18 @@ function objMetrics(o, supAngle) {
   const m = { contact: 0, over: 0, overMaxZ: 0, vert: 0, slope: 0, flat: 0, box: new THREE.Box3(), faces: new Map() };
   const cosLim = Math.cos(supAngle * Math.PI / 180); // aşağı bakan yüzün yataya açısı < eşik → destek ister
   const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), n = new THREE.Vector3(), t = new THREE.Vector3();
+  if (o.box) m.box.copy(o.box);
+  // çok büyük modellerde (milyonlarca üçgen) eşit aralıklı örneklem yeter: alanlar örneklem oranıyla ölçeklenir
+  const total = objParts(o).reduce((n2, pt) => n2 + pt.geom.attributes.position.count / 3, 0);
+  const stride = Math.max(1, Math.ceil(total / 300000));
+  const cz = Math.cos(o.rotZ), sz = Math.sin(o.rotZ);
+  const W = (v, x, y, z) => { const X = x * o.sx, Y = y * o.sy; v.set(X * cz - Y * sz + o.x, X * sz + Y * cz + o.y, z * o.sz); };
   objParts(o).forEach(pt => {
-    const g = pt.mesh.geometry, p = g.attributes.position.array;
-    if (g.boundingBox) m.box.union(g.boundingBox);
-    for (let i = 0; i < p.length; i += 9) {
-      a.set(p[i], p[i + 1], p[i + 2]); b.set(p[i + 3], p[i + 4], p[i + 5]); c.set(p[i + 6], p[i + 7], p[i + 8]);
+    const p = pt.geom.attributes.position.array;
+    for (let i = 0; i < p.length; i += 9 * stride) {
+      W(a, p[i], p[i + 1], p[i + 2]); W(b, p[i + 3], p[i + 4], p[i + 5]); W(c, p[i + 6], p[i + 7], p[i + 8]);
       n.subVectors(b, a).cross(t.subVectors(c, a));
-      const area = n.length() / 2; if (area < 1e-9) continue;
+      const area = n.length() / 2 * stride; if (area < 1e-9) continue;
       n.normalize();
       const zmin = Math.min(a.z, b.z, c.z), az = Math.abs(n.z);
       if (n.z < -0.985 && zmin < 0.05 && Math.max(a.z, b.z, c.z) < 0.05) m.contact += area;
@@ -1103,7 +1342,7 @@ async function saveProject() {
   const blob = await writeProject({
     objects: live,
     parts: parts.map(p => ({ name: p.name, positions: p.geom.attributes.position.array, slot: p.slot, flowMul: p.flowMul, obj: live.indexOf(p.obj) })),
-    settings: { printer: state.printer, process: state.process, slots: state.slots },
+    settings: { printer: state.printer, process: state.process, slots: state.slots, flush: state.flush },
     app: { name: 'K1MaxDilimleyici', version: APP_VERSION },
   });
   const base = (live[0].name || 'proje').replace(/[^\w\-çğıöşüÇĞİÖŞÜ ]/g, '_').trim() || 'proje';
@@ -1138,6 +1377,7 @@ async function loadProject(proj, fileName, replace) {
       state.printer = JSON.parse(JSON.stringify(S.printer)); state.process = JSON.parse(JSON.stringify(S.process));
       state.slots = JSON.parse(JSON.stringify(S.slots)).slice(0, SLOT_COUNT);
       while (state.slots.length < SLOT_COUNT) state.slots.push({ name: 'Genel PLA', color: SLOT_COLORS[state.slots.length], values: null });
+      if (S.flush && Array.isArray(S.flush.m)) state.flush = JSON.parse(JSON.stringify(S.flush));
       saveState(); state = loadState();
       if (keep.hostIp) { state.printer.values.hostIp = keep.hostIp; state.printer.values.hostPort = keep.hostPort; saveState(); }
       renderAll(); buildBed(); recolorParts();
@@ -1298,8 +1538,9 @@ const PV = 11;
 function buildJob() {
   const S = Object.assign({}, state.printer.values, state.process.values);
   const fils = state.slots.map(sl => Object.assign({}, sl.values, { color: sl.color, name: sl.name }));
-  const jobParts = parts.map(p => ({ name: p.name, slot: p.slot, flowMul: p.flowMul || 1, positions: new Float32Array(p.mesh.geometry.attributes.position.array) }));
-  const job = { parts: jobParts, S, fils };
+  const jobParts = parts.map(p => ({ name: p.name, slot: p.slot, flowMul: p.flowMul || 1, positions: worldGeom(p).attributes.position.array }));
+  const F = state.flush;
+  const job = { parts: jobParts, S, fils, flush: F && F.on ? F.m.map(row => row.map(v => Math.max(0, v * F.mult))) : null };
   if (calibMode) {
     Object.assign(S, calibMode.S || {});
     if (calibMode.F) Object.assign(fils[0], calibMode.F(fils[0]));
@@ -1328,6 +1569,23 @@ function makeWorker() {
     catch (e) { return mainThreadWorker(); }
   }
   return new Worker('slicer-worker.js');
+}
+// Çok çekirdek: yardımcı iş parçacıklarını sayfa açar (yerel dosyadan açılan sayfada iş parçacığı başka
+// iş parçacığı açamıyor) ve her dilimlemede dilimleme iş parçacığına her yardımcı için doğrudan bir kanal verir.
+let helpers = null;
+function getHelpers() {
+  if (helpers !== null) return helpers;
+  helpers = [];
+  try {
+    const n = Math.min(8, (navigator.hardwareConcurrency || 2) - 1);
+    if (n < 2 || typeof MessageChannel === 'undefined') return helpers;
+    const url = window.K1_WORKER_SRC ? URL.createObjectURL(new Blob([window.K1_WORKER_SRC], { type: 'text/javascript' })) : 'slicer-worker.js';
+    for (let i = 0; i < n; i++) helpers.push(new Worker(url));
+  } catch (e) { helpers.forEach(h => h.terminate()); helpers = []; }
+  return helpers;
+}
+function helperPorts() {
+  return getHelpers().map(h => { const ch = new MessageChannel(); h.postMessage({ type: 'port' }, [ch.port2]); return ch.port1; });
 }
 function mainThreadWorker() {
   const w = { onmessage: null, onerror: null, terminate() { w.dead = true; } };
@@ -1363,7 +1621,9 @@ function startWorker(w, job) {
     done(); toast('Dilimleme hatası: ' + (e.message || 'bilinmeyen'), true);
   };
   const transfer = worker instanceof Worker ? job.parts.map(p => p.positions.buffer) : [];
-  worker.postMessage({ type: 'slice', job }, transfer);
+  let ports = [];
+  if (worker instanceof Worker) { try { ports = helperPorts(); } catch (e) { ports = []; } }
+  worker.postMessage({ type: 'slice', job, ports }, transfer.concat(ports));
 }
 
 // Önizleme: her ekstrüzyon hareketi, gerçek genişlik ve yükseklikte, kesiti baklava biçimli bir prizma.
@@ -1445,6 +1705,7 @@ function buildPreview(res) {
 }
 
 function onResult(res) {
+  wake(10);
   result = res;
   result.name = gcodeName();
   clearPreviewObj();
@@ -1467,7 +1728,7 @@ function onResult(res) {
   $('stats').innerHTML = `Süre: <b>${fmtTime(st.time)}</b> · Filament: <b>${(st.filamentMm / 1000).toFixed(2)} m</b> (<b>${st.grams.toFixed(1)} g</b>)` +
     (st.cost > 0 ? ` · Maliyet: <b>${st.cost.toFixed(2)} ₺</b>` : '') +
     (multi ? ` · Renk değişimi: <b>${st.toolChanges}</b>` : '') + per +
-    ` · Katman: <b>${st.layers}</b>` + (res.adaptive && res.layerH ? ` (uyarlanabilir ${Math.min(...res.layerH.slice(1)).toFixed(2)}–${Math.max(...res.layerH.slice(1)).toFixed(2)} mm)` : '') + (st.ms ? ` · ${(st.ms / 1000).toFixed(1)} sn` : '');
+    ` · Katman: <b>${st.layers}</b>` + (res.adaptive && res.layerH ? ` (uyarlanabilir ${Math.min(...res.layerH.slice(1)).toFixed(2)}–${Math.max(...res.layerH.slice(1)).toFixed(2)} mm)` : '') + (st.ms ? ` · ${(st.ms / 1000).toFixed(1)} sn${st.threads > 1 ? ` (${st.threads + 1} çekirdek)` : ''}` : '');
   $('sendHint').textContent = `${result.name} hazır (${fmtTime(st.time)}).`;
 }
 
@@ -1622,7 +1883,8 @@ function makeThumbnails(sizes) {
   const sc = new THREE.Scene();
   addLights(sc);
   const bb = new THREE.Box3();
-  parts.forEach(p => { sc.add(new THREE.Mesh(p.mesh.geometry, p.mesh.material)); bb.union(p.mesh.geometry.boundingBox); });
+  parts.forEach(p => { const m = new THREE.Mesh(p.geom, p.mesh.material); m.position.copy(p.mesh.position); m.rotation.copy(p.mesh.rotation); m.scale.copy(p.mesh.scale); sc.add(m); });
+  objects.forEach(o => { if (o.box) bb.union(o.box); });
   const c = bb.getCenter(new THREE.Vector3()), r = Math.max(1, bb.getSize(new THREE.Vector3()).length() / 2);
   const cam = new THREE.PerspectiveCamera(35, 1, 0.1, 5000); cam.up.set(0, 0, 1);
   const d = r / Math.sin(THREE.MathUtils.degToRad(17.5)) * 1.05;

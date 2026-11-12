@@ -213,14 +213,34 @@ body[data-tab="device"] .panel [data-sec="device"] { display: block; }
 .ana .it.tip { border-left: 3px solid #2fa36b; }
 .ana .it.ok { border-left: 3px solid #7aa7ff; }
 .ana .it button { flex: none; }
-/* önizlemede düzenleme çubuğu */
-.edittools { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); z-index: 3; display: flex; align-items: center; gap: 6px;
-  background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 6px 8px; box-shadow: 0 6px 18px rgba(0,0,0,.18);
-  max-width: calc(100% - 16px); flex-wrap: wrap; justify-content: center; }
-.edittools .et-name { font-size: 12px; color: var(--muted); max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.edittools .btn { white-space: nowrap; }
-.edittools .et-deg { display: flex; align-items: center; gap: 2px; font-size: 13px; }
-.edittools .et-deg input { width: 58px; }
-.edittools:not([hidden]) ~ .edithint, #editTools:not([hidden]) + .edithint { bottom: 64px; }
-#editHint { bottom: 64px; }
-@media (max-width: 560px) { .edittools { width: calc(100% - 16px); gap: 5px; } .edittools .et-name { flex-basis: 100%; text-align: center; max-width: none; } #editHint { bottom: 112px; } }
+/* 3B görünüm araç çubuğu (Orca benzeri): masaüstünde üstte sabit, telefonda "Düzenle" ile açılır */
+.tb { position: absolute; left: 10px; top: 10px; z-index: 4; display: flex; align-items: center; gap: 2px; flex-wrap: wrap;
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 4px; box-shadow: 0 6px 18px rgba(0,0,0,.18);
+  max-width: calc(100% - 300px); }
+.tbt { width: 36px; height: 36px; display: grid; place-items: center; border: 0; background: transparent; border-radius: 8px; color: var(--text); cursor: pointer; }
+.tbt svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.tbt:hover { background: var(--chip); }
+.tbt.on { background: var(--accent); color: #fff; }
+.tbt:disabled { opacity: .35; cursor: default; }
+.tbsep { width: 1px; height: 24px; background: var(--line); margin: 0 4px; }
+.tbpanel { position: absolute; left: 10px; top: 60px; z-index: 4; background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  padding: 8px 10px; box-shadow: 0 6px 18px rgba(0,0,0,.18); font-size: 13px; max-width: calc(100% - 20px); }
+.tbp { display: none; align-items: center; gap: 6px; flex-wrap: wrap; }
+.tbpanel[data-show="move"] .tbp[data-p="move"], .tbpanel[data-show="rot"] .tbp[data-p="rot"],
+.tbpanel[data-show="scale"] .tbp[data-p="scale"], .tbpanel[data-show="view"] .tbp[data-p="view"] { display: flex; }
+.tbp-view { flex-direction: column; align-items: flex-start !important; }
+.tbp input[type=number] { width: 66px; }
+.tbp-name { font-size: 12px; color: var(--muted); margin-bottom: 6px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tbpanel[data-show="view"] .tbp-name { display: none; }
+.tbp-unit { color: var(--muted); font-size: 12px; }
+.tbtoggle { display: none; position: absolute; right: 10px; bottom: 10px; z-index: 5; box-shadow: 0 6px 18px rgba(0,0,0,.2); }
+.labels { position: absolute; inset: 0; pointer-events: none; z-index: 2; overflow: hidden; }
+.labels span { position: absolute; transform: translate(-50%, -100%); background: rgba(0,0,0,.6); color: #fff; font-size: 11px; padding: 2px 6px; border-radius: 6px; white-space: nowrap; }
+@media (max-width: 820px) {
+  .tbtoggle { display: block; }
+  .tb { left: 8px; right: 8px; top: auto; bottom: 54px; max-width: none; justify-content: center; }
+  body:not(.tbopen) .tb, body:not(.tbopen) .tbpanel { display: none !important; }
+  .tbpanel { top: auto; bottom: 150px; left: 8px; right: 8px; }
+  .tbt { width: 40px; height: 40px; }
+  #editHint { bottom: 54px; }
+}

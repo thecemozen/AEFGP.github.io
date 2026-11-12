@@ -11,6 +11,12 @@ let win = null;
 let pending = []; // pencere hazır olmadan gelen dosyalar
 let ready = false;
 
+// Çok büyük modeller (milyonlarca üçgen) için JavaScript bellek sınırını yükselt; ekran kartını kara listeye
+// takılsa da kullan ve iki ekran kartlı dizüstülerde güçlü olanı seç
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=8192');
+app.commandLine.appendSwitch('ignore-gpu-blocklist');
+app.commandLine.appendSwitch('force_high_performance_gpu');
+
 if (!app.requestSingleInstanceLock()) { app.quit(); }
 else {
   app.on('second-instance', (_e, argv) => {

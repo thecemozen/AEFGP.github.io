@@ -1,5 +1,5 @@
 /* Çevrimdışı çalışma: uygulama dosyalarını ve sabit sürümlü kütüphaneleri önbelleğe alır. */
-const VERSION = 'k1max-v7';
+const VERSION = 'k1max-v8';
 const APP = [
   './', './index.html', './style.css', './app.js', './presets.js', './slicer-core.js', './slicer-worker.js', './threemf.js', './project3mf.js', './meshrepair.js', './bed-model.js',
   './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png',
