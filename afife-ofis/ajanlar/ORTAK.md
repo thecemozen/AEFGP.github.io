@@ -20,8 +20,9 @@
 ## Görsel kimlik
 - Renkler: turuncu #E75F27 (vurgu), krem #FFFAED (zemin), koyu yeşil #2D402E (metin/panel),
   zeytin #6B7F61, kiremit #A65D45, suluboya leke turuncu #F2A541 ve pembe #EE8A84.
-- Fontlar: Poppins (başlık/gövde) + Libre Bodoni İtalik (sanatsal vurgu, numaralar).
-- Reels altyazı: Poppins SemiBold 68, beyaz, koyu yeşil gölge. Müzik eklenmez (Instagram'da eklenir).
+- Fontlar: başlıklar Playfair Display, diğer tüm yazılar (gövde, etiket, not, altyazı) Montserrat.
+  Sanatsal vurgu ve büyük numaralar için Playfair Display İtalik. Başka font kullanma.
+- Reels altyazı: Montserrat SemiBold 68, beyaz, koyu yeşil gölge. Müzik eklenmez (Instagram'da eklenir).
 
 ## Gizlilik
 - Çocukların yüzü, adı, okulu hiçbir çıktıya veli izni olmadan girmez.

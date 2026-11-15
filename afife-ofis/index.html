@@ -7,7 +7,7 @@
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Libre+Bodoni:ital,wght@1,500;1,600&family=Poppins:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,600;0,700;1,600;1,700&display=swap">
 <style>
 /* Yerleşim: tam ekran izometrik ofis; üstte başlık ve departman şeridi, altta görev kutusu,
    solda çalışan kartı, sağda açılır Takvim/Akış paneli. Renkler Atölye Afife kimliğinden. */
@@ -30,8 +30,9 @@
   --etiket-metin: #2D402E;
   --etiket-koyu: #2D402E;
   --etiket-koyu-metin: #FFFAED;
-  --f-govde: 'Poppins', system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --f-sanat: 'Libre Bodoni', 'Bodoni 72', Georgia, serif;
+  --f-govde: 'Montserrat', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --f-baslik: 'Playfair Display', Georgia, 'Times New Roman', serif;
+  --f-sanat: 'Playfair Display', Georgia, serif;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -75,7 +76,7 @@ button { cursor: pointer; }
 .ust-satir { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: space-between; }
 .marka { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .marka svg { width: 38px; height: 38px; flex: none; }
-.marka h1 { margin: 0; font: 600 18px/1.1 var(--f-govde); letter-spacing: -.01em; }
+.marka h1 { margin: 0; font: 700 20px/1.1 var(--f-baslik); }
 .marka h1 em { font: italic 600 20px/1 var(--f-sanat); color: var(--vurgu); }
 .marka small { display: block; color: var(--soluk); font-size: 12px; font-variant-numeric: tabular-nums; }
 .ust-tuslar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
@@ -199,7 +200,7 @@ button { cursor: pointer; }
 .kart-ust { display: flex; align-items: center; gap: 8px; font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; font-weight: 600; color: var(--soluk); }
 .kart-ust i { width: 8px; height: 8px; border-radius: 50%; }
 .kart-ust span:last-child { margin-left: auto; letter-spacing: .04em; font-variant-numeric: tabular-nums; }
-.kart h2 { margin: 6px 0 2px; font: 600 24px/1.15 var(--f-govde); letter-spacing: -.02em; text-wrap: balance; }
+.kart h2 { margin: 6px 0 2px; font: 700 25px/1.15 var(--f-baslik); text-wrap: balance; }
 .kart p { margin: 0 0 10px; color: var(--soluk); font-size: 13px; }
 .ciplar { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 10px; }
 .cip { font-size: 11.5px; padding: 3px 9px; border-radius: 99px; background: var(--zemin); border: 1px solid var(--cizgi); }
@@ -224,7 +225,8 @@ button { cursor: pointer; }
   background: var(--kart); border: 1px solid var(--cizgi); border-radius: 18px; box-shadow: var(--golge);
 }
 .panel header { display: flex; align-items: center; padding: 12px 10px 10px 16px; border-bottom: 1px solid var(--cizgi); }
-.panel h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.panel h3 { margin: 0; font: 700 17px/1.2 var(--f-baslik); }
+.panel h3 small { font-family: var(--f-govde); }
 .panel h3 small { font-weight: 400; color: var(--soluk); font-size: 12px; margin-left: 6px; }
 .panel .kapat { margin-left: auto; }
 .panel-ic { overflow-y: auto; padding: 8px 10px 12px; display: grid; gap: 6px; align-content: start; min-height: 0; flex: 1; }
@@ -256,15 +258,15 @@ button { cursor: pointer; }
 }
 .rapor-bas { border-radius: 14px; padding: 18px 20px; color: #FFFAED; position: relative; overflow: hidden; }
 .rapor-bas small { font-size: 10.5px; letter-spacing: .16em; text-transform: uppercase; font-weight: 600; opacity: .85; }
-.rapor-bas h2 { margin: 4px 0 0; font: 600 24px/1.2 var(--f-govde); letter-spacing: -.02em; text-wrap: balance; }
+.rapor-bas h2 { margin: 4px 0 0; font: 700 26px/1.2 var(--f-baslik); text-wrap: balance; }
 .rapor-bas .tarih { position: absolute; top: 14px; right: 14px; font-size: 11px; padding: 3px 10px; border-radius: 99px; background: rgba(255, 250, 237, .2); }
 .rapor-bas .kapat { position: absolute; bottom: 10px; right: 10px; color: #FFFAED; }
 .ornek { margin: 10px 4px 0; font-size: 11.5px; color: var(--soluk); display: flex; gap: 6px; align-items: center; }
 .ornek i { width: 6px; height: 6px; border-radius: 50%; background: var(--vurgu); }
 .rapor-ic { padding: 4px 8px 6px; font-size: 13.5px; }
 .rapor-ic .ozet { margin: 12px 0 4px; padding: 10px 14px; border-left: 3px solid var(--vurgu); background: var(--zemin); border-radius: 0 10px 10px 0; }
-.rapor-ic h3 { font-size: 15px; margin: 18px 0 8px; font-weight: 600; }
-.rapor-ic h4 { font-size: 13.5px; margin: 14px 0 6px; }
+.rapor-ic h3 { font: 700 17px/1.3 var(--f-baslik); margin: 18px 0 8px; }
+.rapor-ic h4 { font-family: var(--f-baslik); font-size: 14.5px; margin: 14px 0 6px; }
 .rapor-ic p { margin: 6px 0; }
 .rapor-ic ul, .rapor-ic ol { margin: 6px 0; padding-left: 22px; display: grid; gap: 5px; }
 .rapor-ic ol { counter-reset: s; list-style: none; padding-left: 0; }
@@ -286,7 +288,7 @@ button { cursor: pointer; }
 <header class="ust">
   <div class="ust-satir">
     <div class="marka">
-      <svg viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="19" fill="#E75F27"/><text x="20" y="27" text-anchor="middle" font-family="Libre Bodoni, Georgia, serif" font-style="italic" font-weight="600" font-size="22" fill="#FFFAED">a</text></svg>
+      <svg viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="19" fill="#E75F27"/><text x="20" y="27" text-anchor="middle" font-family="Playfair Display, Georgia, serif" font-style="italic" font-weight="600" font-size="22" fill="#FFFAED">a</text></svg>
       <div>
         <h1>Afife <em>ofisi</em></h1>
         <small id="sayac">yükleniyor…</small>
@@ -632,9 +634,9 @@ function tabelaDoku() {
   const c = document.createElement('canvas'); c.width = 1024; c.height = 256; const g = c.getContext('2d');
   g.fillStyle = '#2D402E'; g.fillRect(0, 0, 1024, 256);
   g.fillStyle = '#E75F27'; g.beginPath(); g.arc(128, 128, 84, 0, 7); g.fill();
-  g.fillStyle = '#FFFAED'; g.font = 'italic 600 120px "Libre Bodoni", Georgia, serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('a', 128, 120);
-  g.textAlign = 'left'; g.font = '600 112px Poppins, sans-serif'; g.fillText('atölye', 250, 132);
-  g.fillStyle = '#E75F27'; g.font = 'italic 600 120px "Libre Bodoni", Georgia, serif'; g.fillText('afife', 640, 126);
+  g.fillStyle = '#FFFAED'; g.font = 'italic 700 120px "Playfair Display", Georgia, serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('a', 128, 120);
+  g.textAlign = 'left'; g.font = '600 104px Montserrat, sans-serif'; g.fillText('atölye', 250, 132);
+  g.fillStyle = '#E75F27'; g.font = 'italic 700 118px "Playfair Display", Georgia, serif'; g.fillText('afife', 640, 126);
   const t = new THREE.CanvasTexture(c); t.anisotropy = 4; return t;
 }
 

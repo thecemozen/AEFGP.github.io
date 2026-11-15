@@ -3,11 +3,12 @@
   "hesap": "@atolye.afife",
   "kaynak": "Drive: Atölye Afife/afife/tema.json (2026-10 kurumsal kimlik)",
   "renkler": { "panel": "#2D402E", "vurgu": "#E75F27", "kart_metin": "#FFFAED", "altyazi": "#FFFFFF", "golge": "#2D402E" },
-  "altyazi": { "font": "Poppins-SemiBold", "boyut": 68, "kontur": 2, "golge_kontur": 8, "golge_bulaniklik": 8, "golge_opaklik": 220, "max_genislik": 700 },
+  "altyazi": { "font": "Montserrat-SemiBold", "boyut": 68, "kontur": 2, "golge_kontur": 8, "golge_bulaniklik": 8, "golge_opaklik": 220, "max_genislik": 700 },
   "animasyon": {
     "zemin": "#FFFAED", "desen": "#E8D5C8", "vurgu": "#E75F27", "metin": "#2D402E", "ikincil": "#6B7F61",
     "cizgi": "#A65D45", "kart": "#FFFFFF", "hap": "#2D402E", "hap_metin": "#FFFAED",
-    "fontlar": { "dev": "Poppins-Bold", "baslik": "Poppins-SemiBold", "sanat": "LibreBodoni-Italic", "numara": "LibreBodoni-Italic", "vurgu": "Poppins-SemiBold", "hap": "Poppins-Medium", "etiket": "Poppins-Regular", "deger": "Poppins-SemiBold", "not": "Poppins-Regular" },
+    "fontlar": { "dev": "PlayfairDisplay-Bold", "baslik": "PlayfairDisplay-Bold", "sanat": "PlayfairDisplay-Italic", "numara": "PlayfairDisplay-Italic", "vurgu": "Montserrat-SemiBold", "hap": "Montserrat-Medium", "etiket": "Montserrat-Regular", "deger": "Montserrat-SemiBold", "not": "Montserrat-Regular" },
+    "font_kurali": "2026-11: başlıklar Playfair Display, diğer tüm yazılar Montserrat (ikisi de Google Fonts, OFL)",
     "zemin_stili": "suluboya",
     "suluboya": [
       { "ad": "turuncu_sade", "renk": "#F2A541", "konum": "sol üst", "opaklik": 0.8 },

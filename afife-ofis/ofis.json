@@ -44,7 +44,7 @@
 
     {
       "id": "reels-editoru", "ad": "Reels Editörü", "departman": "produksiyon", "model": "opus",
-      "aciklama": "Çekimlerdeki ham görüntüyü Afife tarzında Reels'e çevirir: krem zemin, suluboya lekeler, Poppins altyazı.",
+      "aciklama": "Çekimlerdeki ham görüntüyü Afife tarzında Reels'e çevirir: krem zemin, suluboya lekeler, Playfair Display başlık, Montserrat altyazı.",
       "baglantilar": ["Google Drive · Çekimler", "tema.json"],
       "araclar": "Read,Write,Edit,Bash",
       "anahtar": ["kurgu", "edit", "montaj", "altyazı", "videoyu kes", "reels yap", "reels'e çevir"]
