@@ -1,0 +1,17 @@
+{
+  "ad": "Atölye Afife",
+  "hesap": "@atolye.afife",
+  "kaynak": "Drive: Atölye Afife/afife/tema.json (2026-10 kurumsal kimlik)",
+  "renkler": { "panel": "#2D402E", "vurgu": "#E75F27", "kart_metin": "#FFFAED", "altyazi": "#FFFFFF", "golge": "#2D402E" },
+  "altyazi": { "font": "Poppins-SemiBold", "boyut": 68, "kontur": 2, "golge_kontur": 8, "golge_bulaniklik": 8, "golge_opaklik": 220, "max_genislik": 700 },
+  "animasyon": {
+    "zemin": "#FFFAED", "desen": "#E8D5C8", "vurgu": "#E75F27", "metin": "#2D402E", "ikincil": "#6B7F61",
+    "cizgi": "#A65D45", "kart": "#FFFFFF", "hap": "#2D402E", "hap_metin": "#FFFAED",
+    "fontlar": { "dev": "Poppins-Bold", "baslik": "Poppins-SemiBold", "sanat": "LibreBodoni-Italic", "numara": "LibreBodoni-Italic", "vurgu": "Poppins-SemiBold", "hap": "Poppins-Medium", "etiket": "Poppins-Regular", "deger": "Poppins-SemiBold", "not": "Poppins-Regular" },
+    "zemin_stili": "suluboya",
+    "suluboya": [
+      { "ad": "turuncu_sade", "renk": "#F2A541", "konum": "sol üst", "opaklik": 0.8 },
+      { "ad": "pembe_sade", "renk": "#EE8A84", "konum": "sağ alt", "opaklik": 0.75 }
+    ]
+  }
+}

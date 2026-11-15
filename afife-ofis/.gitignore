@@ -1,0 +1,4 @@
+# Ajan çıktıları ve iş kaydı yerelde kalır (veli/finans bilgisi içerebilir)
+kayit/
+ajanlar/*/ciktilar/*
+!ajanlar/*/ciktilar/.gitkeep

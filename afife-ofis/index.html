@@ -1,0 +1,1213 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Afife Ofisi</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Libre+Bodoni:ital,wght@1,500;1,600&family=Poppins:wght@400;500;600;700&display=swap">
+<style>
+/* Yerleşim: tam ekran izometrik ofis; üstte başlık ve departman şeridi, altta görev kutusu,
+   solda çalışan kartı, sağda açılır Takvim/Akış paneli. Renkler Atölye Afife kimliğinden. */
+:root {
+  --zemin: #F4EEE4;
+  --kart: #FFFDF8;
+  --metin: #2D402E;
+  --soluk: #6B7F61;
+  --vurgu: #E75F27;
+  --vurgu-metin: #FFFAED;
+  --cizgi: rgba(45, 64, 46, .14);
+  --golge: 0 14px 40px rgba(45, 64, 46, .16);
+  --hap: #2D402E;
+  --hap-metin: #FFFAED;
+  --basari: #2F8F5B;
+  --basari-zemin: #DDF1E4;
+  --hata: #C0392B;
+  /* Sahnedeki etiketler ahşap/beyaz zeminin üstünde durur; iki temada da aynı kalır. */
+  --etiket-zemin: rgba(255, 253, 248, .94);
+  --etiket-metin: #2D402E;
+  --etiket-koyu: #2D402E;
+  --etiket-koyu-metin: #FFFAED;
+  --f-govde: 'Poppins', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --f-sanat: 'Libre Bodoni', 'Bodoni 72', Georgia, serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --zemin: #151A16; --kart: #212822; --metin: #F3EBDD; --soluk: #A9B59E; --vurgu: #F07A45;
+    --vurgu-metin: #1B1410; --cizgi: rgba(255, 250, 237, .12); --golge: 0 14px 40px rgba(0, 0, 0, .45);
+    --hap: #FFFAED; --hap-metin: #2D402E; --basari: #5CC08A; --basari-zemin: #1E3A2A; --hata: #EF7B6A;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --zemin: #151A16; --kart: #212822; --metin: #F3EBDD; --soluk: #A9B59E; --vurgu: #F07A45;
+  --vurgu-metin: #1B1410; --cizgi: rgba(255, 250, 237, .12); --golge: 0 14px 40px rgba(0, 0, 0, .45);
+  --hap: #FFFAED; --hap-metin: #2D402E; --basari: #5CC08A; --basari-zemin: #1E3A2A; --hata: #EF7B6A;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body {
+  margin: 0; overflow: hidden; background: var(--zemin); color: var(--metin);
+  font: 400 14px/1.45 var(--f-govde); -webkit-font-smoothing: antialiased;
+}
+button, select, textarea, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--vurgu); outline-offset: 2px; }
+
+#sahne { position: fixed; inset: 0; }
+#sahne canvas { display: block; touch-action: none; }
+#etiketler { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
+
+/* ---------- Üst bar ---------- */
+.ust {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 5; pointer-events: none;
+  padding-top: calc(12px + env(safe-area-inset-top, 0px));
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 10px;
+}
+.ust > * { pointer-events: auto; }
+.ust-satir { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: space-between; }
+.marka { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.marka svg { width: 38px; height: 38px; flex: none; }
+.marka h1 { margin: 0; font: 600 18px/1.1 var(--f-govde); letter-spacing: -.01em; }
+.marka h1 em { font: italic 600 20px/1 var(--f-sanat); color: var(--vurgu); }
+.marka small { display: block; color: var(--soluk); font-size: 12px; font-variant-numeric: tabular-nums; }
+.ust-tuslar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.durum {
+  display: inline-flex; align-items: center; gap: 7px; padding: 6px 11px; border-radius: 99px;
+  background: var(--kart); border: 1px solid var(--cizgi); font-size: 12px; font-weight: 500;
+}
+.durum i { width: 8px; height: 8px; border-radius: 50%; background: var(--soluk); }
+.durum.canli i { background: var(--basari); box-shadow: 0 0 0 4px var(--basari-zemin); }
+.tus {
+  border: 1px solid var(--cizgi); background: var(--kart); border-radius: 99px; padding: 6px 13px;
+  font-size: 13px; font-weight: 500; display: inline-flex; gap: 6px; align-items: center;
+}
+.tus:hover { border-color: var(--vurgu); }
+.tus[aria-pressed="true"] { background: var(--hap); color: var(--hap-metin); border-color: var(--hap); }
+
+.departmanlar { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+.departmanlar::-webkit-scrollbar { display: none; }
+.dep-cip {
+  flex: none; display: inline-flex; align-items: center; gap: 7px; padding: 5px 11px 5px 9px;
+  border-radius: 99px; border: 1px solid var(--cizgi); background: var(--kart); font-size: 12.5px; font-weight: 500;
+}
+.dep-cip i { width: 8px; height: 8px; border-radius: 3px; }
+.dep-cip b { font-weight: 600; color: var(--soluk); font-variant-numeric: tabular-nums; }
+
+/* ---------- İş devri bandı ---------- */
+.devir {
+  position: fixed; left: 50%; top: calc(118px + env(safe-area-inset-top, 0px)); transform: translateX(-50%);
+  z-index: 6; display: flex; align-items: center; gap: 10px; padding: 8px 10px 8px 16px; border-radius: 99px;
+  background: var(--kart); box-shadow: var(--golge); border: 1px solid var(--cizgi);
+  font-size: 13px; white-space: nowrap; max-width: calc(100vw - 32px);
+}
+.devir small { font-size: 10.5px; letter-spacing: .14em; color: var(--vurgu); font-weight: 600; }
+.devir .k { padding: 4px 11px; border-radius: 99px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.devir .k.gm { background: var(--vurgu); color: var(--vurgu-metin); }
+.devir .k.hedef { border: 1.5px solid var(--metin); }
+@media (prefers-reduced-motion: no-preference) { .devir:not([hidden]) { animation: yuksel .35s ease-out; } }
+@keyframes yuksel { from { opacity: 0; transform: translate(-50%, 8px); } }
+
+/* ---------- Sahne etiketleri ---------- */
+.et {
+  position: absolute; left: 0; top: 0; will-change: transform; white-space: nowrap;
+  font-size: 11.5px; font-weight: 500; line-height: 1;
+}
+.et-ajan {
+  pointer-events: auto; display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px 5px 8px;
+  background: var(--etiket-zemin); color: var(--etiket-metin); border-radius: 99px; border: 0;
+  box-shadow: 0 2px 8px rgba(45, 64, 46, .18); transform-origin: left center;
+}
+.et-ajan i { width: 7px; height: 7px; border-radius: 50%; }
+.et-ajan small { font-size: 10px; color: #6B7F61; font-weight: 500; }
+.et-ajan.gm { background: var(--etiket-koyu); color: var(--etiket-koyu-metin); }
+.et-ajan.gm small { color: #C9D2BF; }
+.et-ajan.aktif { box-shadow: 0 0 0 2px var(--vurgu), 0 4px 14px rgba(231, 95, 39, .35); }
+.et-dep {
+  display: inline-flex; align-items: center; gap: 7px; padding: 5px 10px 5px 7px; border-radius: 6px;
+  background: var(--etiket-koyu); color: var(--etiket-koyu-metin);
+  font-size: 10px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase;
+}
+.et-dep i { width: 3px; height: 12px; border-radius: 2px; }
+#etiketler.uzak .et-ajan { display: none; }
+#etiketler.uzak .et-dep { font-size: 8.5px; padding: 3px 7px 3px 5px; letter-spacing: .08em; }
+.balon {
+  max-width: 230px; white-space: normal; padding: 9px 13px; border-radius: 14px; font-size: 12.5px;
+  line-height: 1.35; font-weight: 500; background: #FFF3D6; color: #3B2E1E;
+  box-shadow: 0 6px 18px rgba(45, 64, 46, .2); transform-origin: bottom center;
+}
+.balon::after {
+  content: ""; position: absolute; left: 50%; bottom: -6px; width: 12px; height: 12px; margin-left: -6px;
+  background: inherit; transform: rotate(45deg); border-radius: 2px;
+}
+.balon.tamam { background: #D7F0E1; color: #1F4A33; }
+.balon.yeni { background: #2D402E; color: #FFFAED; }
+.balon.hata { background: #FBDAD5; color: #6E1F14; }
+.yaziyor { display: inline-flex; gap: 4px; }
+.yaziyor i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .35; }
+@media (prefers-reduced-motion: no-preference) {
+  .yaziyor i { animation: nokta 1s infinite; }
+  .yaziyor i:nth-child(2) { animation-delay: .15s; } .yaziyor i:nth-child(3) { animation-delay: .3s; }
+  .balon { animation: pop .25s ease-out; }
+}
+@keyframes nokta { 50% { opacity: 1; transform: translateY(-2px); } }
+@keyframes pop { from { opacity: 0; scale: .85; } }
+
+/* ---------- Görev kutusu ---------- */
+.komut {
+  position: fixed; z-index: 5; left: 50%; transform: translateX(-50%);
+  bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+  width: min(720px, calc(100vw - 2 * max(16px, env(safe-area-inset-left, 0px))));
+  background: var(--kart); border: 1px solid var(--cizgi); border-radius: 18px; box-shadow: var(--golge);
+  padding: 12px 12px 10px 16px;
+}
+.komut textarea {
+  width: 100%; border: 0; background: transparent; resize: none; outline: none; font-size: 14.5px;
+  line-height: 1.45; min-height: 44px; max-height: 120px;
+}
+.komut textarea::placeholder { color: var(--soluk); }
+.komut-alt { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; border-top: 1px solid var(--cizgi); padding-top: 9px; }
+.komut-alt label[for="komut-kime"] { font-size: 12px; color: var(--soluk); }
+.komut select {
+  flex: 1 1 200px; min-width: 0; border: 1px solid var(--cizgi); background: var(--zemin); border-radius: 10px;
+  padding: 7px 10px; font-size: 13px;
+}
+.demo-sec { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; }
+.demo-sec input { accent-color: var(--vurgu); width: 16px; height: 16px; }
+.ipucu { font-size: 11px; color: var(--soluk); border: 1px solid var(--cizgi); border-radius: 6px; padding: 2px 6px; }
+.gonder {
+  margin-left: auto; border: 0; border-radius: 12px; padding: 9px 16px; background: var(--vurgu);
+  color: var(--vurgu-metin); font-weight: 600; font-size: 13.5px;
+}
+.gonder:disabled { opacity: .5; cursor: progress; }
+@media (max-width: 560px) { .durum span { display: none; } .durum { padding: 9px; } .ipucu, .komut-alt label[for="komut-kime"] { display: none; } .komut select { flex-basis: 100%; order: -1; } }
+
+/* ---------- Çalışan kartı ---------- */
+.kart {
+  position: fixed; z-index: 6; left: max(16px, env(safe-area-inset-left, 0px));
+  bottom: calc(150px + env(safe-area-inset-bottom, 0px)); width: min(340px, calc(100vw - 32px));
+  background: var(--kart); border: 1px solid var(--cizgi); border-radius: 18px; box-shadow: var(--golge);
+  padding: 16px 18px 14px; overflow: hidden;
+}
+.kart-ust { display: flex; align-items: center; gap: 8px; font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; font-weight: 600; color: var(--soluk); }
+.kart-ust i { width: 8px; height: 8px; border-radius: 50%; }
+.kart-ust span:last-child { margin-left: auto; letter-spacing: .04em; font-variant-numeric: tabular-nums; }
+.kart h2 { margin: 6px 0 2px; font: 600 24px/1.15 var(--f-govde); letter-spacing: -.02em; text-wrap: balance; }
+.kart p { margin: 0 0 10px; color: var(--soluk); font-size: 13px; }
+.ciplar { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 10px; }
+.cip { font-size: 11.5px; padding: 3px 9px; border-radius: 99px; background: var(--zemin); border: 1px solid var(--cizgi); }
+.kart .zaman { font-size: 12.5px; color: var(--metin); display: flex; gap: 6px; align-items: baseline; }
+.kart .zaman b { font: italic 600 16px/1 var(--f-sanat); color: var(--vurgu); }
+.ciktilar { display: grid; gap: 4px; margin-bottom: 10px; }
+.ciktilar button { text-align: left; border: 1px solid var(--cizgi); background: var(--zemin); border-radius: 8px; padding: 6px 9px; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kart-alt { display: flex; align-items: center; gap: 8px; }
+.model { font-size: 11.5px; font-weight: 600; padding: 4px 10px; border-radius: 99px; background: color-mix(in srgb, var(--vurgu) 14%, transparent); color: var(--vurgu); }
+.tur-tuslar { display: flex; gap: 2px; margin-left: auto; }
+.tur-tuslar button, .kapat { border: 0; background: transparent; width: 30px; height: 30px; border-radius: 8px; color: var(--soluk); font-size: 15px; }
+.tur-tuslar button:hover, .kapat:hover { background: var(--zemin); color: var(--metin); }
+.kart-gorev { border: 1px solid var(--metin); background: transparent; border-radius: 99px; padding: 5px 12px; font-size: 12.5px; font-weight: 600; }
+.ilerleme { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; }
+.ilerleme i { display: block; height: 100%; width: 0; }
+
+/* ---------- Yan panel ---------- */
+.panel {
+  position: fixed; z-index: 6; right: max(16px, env(safe-area-inset-right, 0px));
+  top: calc(118px + env(safe-area-inset-top, 0px)); bottom: calc(150px + env(safe-area-inset-bottom, 0px));
+  width: min(340px, calc(100vw - 32px)); display: flex; flex-direction: column;
+  background: var(--kart); border: 1px solid var(--cizgi); border-radius: 18px; box-shadow: var(--golge);
+}
+.panel header { display: flex; align-items: center; padding: 12px 10px 10px 16px; border-bottom: 1px solid var(--cizgi); }
+.panel h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.panel h3 small { font-weight: 400; color: var(--soluk); font-size: 12px; margin-left: 6px; }
+.panel .kapat { margin-left: auto; }
+.panel-ic { overflow-y: auto; padding: 8px 10px 12px; display: grid; gap: 6px; align-content: start; min-height: 0; flex: 1; }
+.satir {
+  display: grid; grid-template-columns: 58px 1fr; gap: 10px; padding: 9px 8px; border-radius: 10px;
+  border: 0; background: transparent; text-align: left; width: 100%;
+}
+.satir:hover { background: var(--zemin); }
+.satir .saat { font: italic 600 17px/1.1 var(--f-sanat); color: var(--vurgu); font-variant-numeric: tabular-nums; }
+.satir .saat small { display: block; font: 500 10.5px/1.3 var(--f-govde); color: var(--soluk); margin-top: 3px; }
+.satir strong { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.satir strong i { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.satir span { font-size: 12px; color: var(--soluk); display: block; min-width: 0; }
+.akis-bos { color: var(--soluk); font-size: 13px; padding: 14px 8px; }
+.akis-satir { display: grid; grid-template-columns: 44px 1fr; gap: 8px; padding: 7px 8px; font-size: 12.5px; border-radius: 8px; }
+.akis-satir time { color: var(--soluk); font-variant-numeric: tabular-nums; font-size: 11.5px; padding-top: 1px; }
+.akis-satir b { font-weight: 600; }
+.akis-satir.hata { color: var(--hata); }
+.akis-satir button { margin-top: 4px; border: 1px solid var(--cizgi); background: var(--zemin); border-radius: 99px; padding: 3px 10px; font-size: 11.5px; font-weight: 600; }
+
+/* ---------- Rapor penceresi ---------- */
+.perde {
+  position: fixed; inset: 0; z-index: 20; background: rgba(21, 26, 22, .45); display: grid; place-items: center;
+  padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+}
+.rapor {
+  width: min(680px, 100%); max-height: 100%; overflow-y: auto; background: var(--kart); border-radius: 20px;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, .35); padding: 14px;
+}
+.rapor-bas { border-radius: 14px; padding: 18px 20px; color: #FFFAED; position: relative; overflow: hidden; }
+.rapor-bas small { font-size: 10.5px; letter-spacing: .16em; text-transform: uppercase; font-weight: 600; opacity: .85; }
+.rapor-bas h2 { margin: 4px 0 0; font: 600 24px/1.2 var(--f-govde); letter-spacing: -.02em; text-wrap: balance; }
+.rapor-bas .tarih { position: absolute; top: 14px; right: 14px; font-size: 11px; padding: 3px 10px; border-radius: 99px; background: rgba(255, 250, 237, .2); }
+.rapor-bas .kapat { position: absolute; bottom: 10px; right: 10px; color: #FFFAED; }
+.ornek { margin: 10px 4px 0; font-size: 11.5px; color: var(--soluk); display: flex; gap: 6px; align-items: center; }
+.ornek i { width: 6px; height: 6px; border-radius: 50%; background: var(--vurgu); }
+.rapor-ic { padding: 4px 8px 6px; font-size: 13.5px; }
+.rapor-ic .ozet { margin: 12px 0 4px; padding: 10px 14px; border-left: 3px solid var(--vurgu); background: var(--zemin); border-radius: 0 10px 10px 0; }
+.rapor-ic h3 { font-size: 15px; margin: 18px 0 8px; font-weight: 600; }
+.rapor-ic h4 { font-size: 13.5px; margin: 14px 0 6px; }
+.rapor-ic p { margin: 6px 0; }
+.rapor-ic ul, .rapor-ic ol { margin: 6px 0; padding-left: 22px; display: grid; gap: 5px; }
+.rapor-ic ol { counter-reset: s; list-style: none; padding-left: 0; }
+.rapor-ic ol li { counter-increment: s; display: grid; grid-template-columns: 26px 1fr; gap: 6px; padding: 8px 10px; border: 1px solid var(--cizgi); border-radius: 10px; }
+.rapor-ic ol li::before { content: counter(s); width: 20px; height: 20px; border-radius: 50%; background: var(--hap); color: var(--hap-metin); font-size: 11px; font-weight: 600; display: grid; place-items: center; }
+.rapor-ic code { font-size: 12px; background: var(--zemin); padding: 1px 5px; border-radius: 4px; }
+.tablo { overflow-x: auto; margin: 6px 0; }
+.tablo table { width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.tablo th { text-align: left; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--soluk); font-weight: 600; padding: 6px 8px; border-bottom: 1px solid var(--cizgi); }
+.tablo td { padding: 7px 8px; border-bottom: 1px solid var(--cizgi); }
+.hata-ekran { position: fixed; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; }
+</style>
+</head>
+<body>
+
+<div id="sahne" aria-label="Atölye Afife ofisinin izometrik görünümü"></div>
+<div id="etiketler"></div>
+
+<header class="ust">
+  <div class="ust-satir">
+    <div class="marka">
+      <svg viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="19" fill="#E75F27"/><text x="20" y="27" text-anchor="middle" font-family="Libre Bodoni, Georgia, serif" font-style="italic" font-weight="600" font-size="22" fill="#FFFAED">a</text></svg>
+      <div>
+        <h1>Afife <em>ofisi</em></h1>
+        <small id="sayac">yükleniyor…</small>
+      </div>
+    </div>
+    <div class="ust-tuslar">
+      <span class="durum" id="durum"><i></i><span>Demo modu</span></span>
+      <button class="tus" id="tus-tur" type="button">▶ Ofisi gez</button>
+      <button class="tus" id="tus-takvim" type="button" aria-pressed="false">Takvim</button>
+      <button class="tus" id="tus-akis" type="button" aria-pressed="false">Akış</button>
+    </div>
+  </div>
+  <nav class="departmanlar" id="departmanlar" aria-label="Departmanlar"></nav>
+</header>
+
+<div class="devir" id="devir" hidden>
+  <small>İŞ DEVRİ</small><span class="k gm" id="devir-kimden">Genel Müdür</span><span aria-hidden="true">→</span><span class="k hedef" id="devir-kime"></span>
+</div>
+
+<aside class="kart" id="kart" hidden aria-live="polite">
+  <div class="kart-ust"><i id="kart-nokta"></i><span id="kart-dep"></span><span id="kart-sira"></span></div>
+  <h2 id="kart-ad"></h2>
+  <p id="kart-aciklama"></p>
+  <div class="ciplar" id="kart-baglanti"></div>
+  <p class="zaman" id="kart-zaman" hidden></p>
+  <div class="ciktilar" id="kart-ciktilar"></div>
+  <div class="kart-alt">
+    <span class="model" id="kart-model"></span>
+    <button class="kart-gorev" id="kart-gorev" type="button">Görev ver</button>
+    <div class="tur-tuslar">
+      <button type="button" id="tur-geri" aria-label="Önceki çalışan">‹</button>
+      <button type="button" id="tur-dur" aria-label="Turu duraklat">⏸</button>
+      <button type="button" id="tur-ileri" aria-label="Sonraki çalışan">›</button>
+      <button type="button" id="kart-kapat" aria-label="Kartı kapat">✕</button>
+    </div>
+  </div>
+  <div class="ilerleme"><i id="kart-ilerleme"></i></div>
+</aside>
+
+<aside class="panel" id="panel" hidden>
+  <header><h3 id="panel-baslik"></h3><button class="kapat" id="panel-kapat" type="button" aria-label="Paneli kapat">✕</button></header>
+  <div class="panel-ic" id="panel-ic"></div>
+</aside>
+
+<form class="komut" id="komut" autocomplete="off">
+  <textarea id="komut-metin" rows="2" aria-label="Görev" placeholder="Ekibe bir görev verin… ör. “Seramik grubunun bu haftaki Reels'i için fikir bul ve caption yaz”"></textarea>
+  <div class="komut-alt">
+    <label for="komut-kime">Kime</label>
+    <select id="komut-kime"><option value="">Genel müdür karar versin</option></select>
+    <label class="demo-sec" for="komut-demo"><input type="checkbox" id="komut-demo" checked> Demo</label>
+    <span class="ipucu">Ctrl + Enter</span>
+    <button class="gonder" id="komut-gonder" type="submit">Görevi ver →</button>
+  </div>
+</form>
+
+<div class="perde" id="perde" hidden>
+  <article class="rapor" role="dialog" aria-modal="true" aria-labelledby="rapor-baslik">
+    <div class="rapor-bas" id="rapor-bas">
+      <small id="rapor-ust"></small>
+      <h2 id="rapor-baslik"></h2>
+      <span class="tarih" id="rapor-tarih"></span>
+      <button class="kapat" id="rapor-kapat" type="button" aria-label="Raporu kapat">✕</button>
+    </div>
+    <p class="ornek" id="rapor-ornek" hidden><i></i>Örnek rapor: demo modunda gerçek veri okunmaz, rakamlar temsilidir.</p>
+    <div class="rapor-ic" id="rapor-ic"></div>
+  </article>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+'use strict';
+const $ = s => document.querySelector(s);
+const azHareket = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const GM_RENK = '#2D402E';
+let OFIS, DEP = {}, AJAN = {}, SIRA = [];
+let canli = false;
+
+/* ======================= Örnek raporlar (demo) ======================= */
+const ORNEK = {
+'icerik-avcisi': `# Bugünün 5 videosu
+Bugün 38 video taradım, Afife tarzına en uygun 5'ini seçtim. En güçlü fikir: çamura ilk kez dokunan eller, 15 saniyede.
+
+## Seçilen videolar
+| # | Video | Platform | İzlenme | Afife uyarlaması |
+|---|---|---|---|---|
+| 1 | Çamura ilk dokunuş, yakın plan eller | Reels | 2,1 Mn | Seramik 7-9 yaş, ilk 10 dakika; sadece eller |
+| 2 | "Ressam değilim ama" ilk tuval | TikTok | 1,4 Mn | Yetişkin Resim: 1. ve 8. haftanın işi yan yana |
+| 3 | Tek soruluk felsefe | Reels | 860 B | Çocuklarla Felsefe: "Zaman nedir?" çizimlerle |
+| 4 | İş çıkışı koro, ofis kıyafetiyle | Shorts | 640 B | İş Çıkışı Şarkı Söyleme, ceketler sandalyede |
+| 5 | 10 saniyelik kulis | Reels | 520 B | Tersten Masallar prova arkası |
+
+## Bugün ne çekmelisiniz?
+1. **Seramik ilk dokunuş.** Kanca: "Çamura ilk kez dokunan elleri izleyin." 12-15 sn, müziksiz çekin, yüz yok.
+2. **Yedek:** Yetişkin Resim önce/sonra, caption'da "Perşembe 19:00, DM'den yazın".`,
+
+'rakip-analisti': `# Rakipler bu hafta ne yaptı?
+Bu hafta 5 atölye 31 paylaşım yaptı ve 9 yeni reklam yayına aldı. Dikkat çeken hamle: iki atölye aynı anda "ücretsiz deneme" kampanyası başlattı.
+
+## Rakip rakip
+| Rakip | Paylaşım | Yeni reklam | Öne çıkan hamle |
+|---|---|---|---|
+| Rakip A | 9 | 3 | Ücretsiz deneme haftası, story geri sayımı |
+| Rakip B | 7 | 2 | Kardeş indirimi %15 |
+| Rakip C | 6 | 3 | Yetişkin seramik, akşam grubu açtı |
+| Rakip D | 5 | 1 | Veli yorumlu UGC videolar |
+| Rakip E | 4 | 0 | Fiyat artışı, paylaşım azaldı |
+
+## Bizim için 3 fikir
+1. **Deneme atölyesi bize de lazım.** Doluluğu düşük İngilizce Drama için tek seferlik deneme günü.
+2. **Veli sesi.** 15 sn'lik veli yorumu videoları rakipte iki kat etkileşim alıyor.
+3. **Akşam seramik.** Rakip C açtı; bizde Yetişkin Resim grubu dolu, seramik akşam grubu talebi ölçülebilir.`,
+
+'meta-analist': `# Son 7 gün: Meta reklamları
+Son 7 günde reklama 4.850 ₺ harcandı, 132 mesaj ve 21 deneme talebi geldi. Mesaj başına maliyet 36,7 ₺.
+
+## Kampanyalar
+| Kampanya | Durum | Harcama | Mesaj | Mesaj başı | Deneme talebi |
+|---|---|---|---|---|---|
+| Yeni Dönem · Çocuk Atölyeleri | Aktif | 3.100 ₺ | 94 | 33,0 ₺ | 15 |
+| İş Çıkışı Tiyatro · Mesaj | Aktif | 1.750 ₺ | 38 | 46,1 ₺ | 6 |
+| Seramik · Story | Durduruldu | 0 ₺ | – | – | – |
+
+## Ne gördük?
+- **İyi giden:** Sessiz, el yakın planlı seramik videosu en düşük maliyetli mesajı getiriyor.
+- **Dikkat:** İş Çıkışı Tiyatro reklamı 30+ yaşta iyi, 25-30'da pahalı.
+
+## Yapılacak 3 şey
+1. Seramik videosunu Yeni Dönem kampanyasına ikinci kreatif olarak ekleyin.
+2. Tiyatro reklamında yaş aralığını 30-45'e daraltın.
+3. Gelen 21 deneme talebini Kayıt Sorumlusu'na aktarın.`,
+
+'kayit-sorumlusu': `# Haftalık doluluk
+Toplam doluluk %71. Seramik 7-9 yaş dolu ve 3 kişi beklemede; İngilizce Yaratıcı Drama ve Felsefe yarının altında.
+
+## Branş ve grup
+| Grup | Kontenjan | Dolu | Boş | Not |
+|---|---|---|---|---|
+| Seramik 7-9 yaş | 8 | 8 | 0 | Bekleme listesi 3 |
+| Resim 5-6 yaş | 8 | 6 | 2 | |
+| İngilizce Yaratıcı Drama 8-10 | 10 | 4 | 6 | Strateji Koçu'na |
+| Çocuklarla Felsefe 9-12 | 10 | 5 | 5 | Strateji Koçu'na |
+| İş Çıkışı Tiyatro | 12 | 11 | 1 | |
+| Yetişkin Piyano (saat) | 10 | 7 | 3 | |
+
+## Takip
+1. 4 deneme talebine 3 günden uzun süredir dönülmedi (Veli A., Veli K., B. Y., S. D.).
+2. Seramik bekleme listesi için ikinci grup açılabilir mi? Cumartesi 14:00 boş.`,
+
+'muhasebeci': `# Ekim 2026 ay sonu
+Ekim ayı artıda kapandı; gider Eylül'e göre %6 azaldı, en büyük düşüş malzemede.
+
+## Gider dağılımı
+| Kalem | Pay |
+|---|---|
+| Kira | %34 |
+| Atölye yürütücüsü ödemeleri | %38 |
+| Malzeme (kil, boya, tuval) | %11 |
+| Reklam | %9 |
+| Abonelikler ve yazılım | %4 |
+| Diğer | %4 |
+
+## Tavsiyeler
+1. **Abonelikleri gözden geçirin.** 7 abonelikten 2'si bu ay hiç kullanılmadı.
+2. **Kil toplu alımı.** 3 aylık alımda birim maliyet düşüyor.
+3. **Seramik fiyatı.** Bekleme listesi varken fiyat güncellemesi için uygun zaman.`,
+
+'sosyal-medya': `# Bu haftanın paylaşım planı
+3 Reels, 2 carousel ve her gün bir story. Ağırlık: Seramik ve yeni dönem kayıtları.
+
+## Plan
+| Gün | Saat | Format | Konu |
+|---|---|---|---|
+| Pzt | 19:30 | Reels | Çamura ilk dokunuş |
+| Sal | 12:00 | Carousel | "Çocuklarla Felsefe'de bu hafta: Zaman" |
+| Çar | 19:30 | Reels | İş çıkışı koro, ceketler sandalyede |
+| Per | 12:00 | Carousel | Yetişkin Resim: 1. hafta / 8. hafta |
+| Cum | 19:30 | Reels | Tersten Masallar kulis |
+
+## İlk Reels caption
+**Çamura ilk kez dokunan elleri izleyin.**
+Seramik 7-9 yaş grubumuz cumartesi 11:00'de. Yeni grup için yer sormak isterseniz DM'den yazın.
+#kadıköy #seramikatölyesi #çocuksanatı`,
+
+'viral-tahminci': `# Viral tahmin: Çamura ilk dokunuş
+Genel puan 81/100. Kanca güçlü; 0:09'da tempo düşüyor.
+
+## Puanlar
+| Ölçüt | Puan |
+|---|---|
+| Kanca gücü | 8,7 |
+| İzlenme süresi | 7,6 |
+| Dikkat | 8,1 |
+| Paylaşılma | 8,4 |
+| Kaydetme | 7,2 |
+
+## 3 iyileştirme
+1. **0:09'u hızlandırın.** Kil yoğurma sahnesini 3 sn kısaltın.
+2. **Son kare.** Bitmiş kaseyi gösterin, "Siz olsanız ne yapardınız?" yazın.
+3. **Altyazı.** İlk satırı 6 kelimeye indirin.`,
+};
+
+function genelOrnek(ajan, gorev) {
+  return `# ${ajan.ad} · örnek çıktı
+Demo modunda bu çalışan gerçek işi yapmaz; canlı modda çıktı ajanlar/${ajan.id}/ciktilar/ klasörüne yazılır.
+
+## Aldığı görev
+${gorev}
+
+## Canlıda ne yapacak
+${ajan.aciklama}
+
+## Kullanacağı bağlantılar
+${ajan.baglantilar.map(b => '- ' + b).join('\n')}`;
+}
+
+/* ======================= Yardımcılar ======================= */
+const esc = t => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const inl = t => esc(t).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/`(.+?)`/g, '<code>$1</code>');
+function md(s) {
+  const L = s.replace(/\r/g, '').split('\n'); let h = '', i = 0;
+  const blok = /^(#{1,4}\s|\||\s*[-*]\s|\s*\d+\.\s|>)/;
+  while (i < L.length) {
+    const l = L[i]; let m;
+    if (!l.trim()) { i++; continue; }
+    if ((m = l.match(/^(#{1,4})\s+(.*)/))) { const n = Math.min(m[1].length + 1, 5); h += `<h${n}>${inl(m[2])}</h${n}>`; i++; continue; }
+    if (/^\|/.test(l)) {
+      const r = []; while (i < L.length && /^\|/.test(L[i])) r.push(L[i++]);
+      const hucre = x => x.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+      const satirlar = r.filter(x => !/^[\s|:-]+$/.test(x));
+      h += '<div class="tablo"><table><thead><tr>' + hucre(satirlar[0]).map(c => `<th>${inl(c)}</th>`).join('') + '</tr></thead><tbody>' +
+        satirlar.slice(1).map(x => '<tr>' + hucre(x).map(c => `<td>${inl(c)}</td>`).join('') + '</tr>').join('') + '</tbody></table></div>';
+      continue;
+    }
+    if (/^\s*[-*]\s+/.test(l)) { let li = ''; while (i < L.length && /^\s*[-*]\s+/.test(L[i])) li += `<li>${inl(L[i++].replace(/^\s*[-*]\s+/, ''))}</li>`; h += `<ul>${li}</ul>`; continue; }
+    if (/^\s*\d+\.\s+/.test(l)) { let li = ''; while (i < L.length && /^\s*\d+\.\s+/.test(L[i])) li += `<li><span>${inl(L[i++].replace(/^\s*\d+\.\s+/, ''))}</span></li>`; h += `<ol>${li}</ol>`; continue; }
+    if (/^>/.test(l)) { const q = []; while (i < L.length && /^>/.test(L[i])) q.push(L[i++].replace(/^>\s?/, '')); h += `<p class="ozet">${inl(q.join(' '))}</p>`; continue; }
+    const p = []; while (i < L.length && L[i].trim() && !blok.test(L[i])) p.push(L[i++]);
+    h += `<p>${inl(p.join(' '))}</p>`;
+  }
+  return h;
+}
+const saatYaz = d => d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+const bekle = ms => new Promise(r => setTimeout(r, ms));
+const modelAd = m => ({ opus: 'Claude Opus', sonnet: 'Claude Sonnet', haiku: 'Claude Haiku' }[m] || m);
+const GUN_AD = { pzt: 'Pazartesi', sal: 'Salı', car: 'Çarşamba', per: 'Perşembe', cum: 'Cuma', cmt: 'Cumartesi', paz: 'Pazar' };
+function zamanMetni(z) {
+  if (!z) return '';
+  if (z.ayinSonGunu) return 'Ayın son günü';
+  if (z.gunler) return z.gunler.map(g => GUN_AD[g] || g).join(', ');
+  return 'Her gün';
+}
+
+/* ======================= 3B sahne ======================= */
+let renderer, scene, camera, controls, raycaster, isaretci;
+const etiketler = [];       // {el, pos: THREE.Vector3, ox, oy}
+const tiklanabilir = [];
+let ucanlar = [];
+let kameraHedef = null;     // {target, zoom, t0, from, fromZoom}
+
+const ODA_W = 9, ODA_D = 7;
+const KOLON = [-13.5, -3, 7.5], SATIR = [-5.5, 4.5];
+const mat = (c, o = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: .8, metalness: 0, ...o });
+const CAM = new THREE.MeshStandardMaterial({ color: 0xE3F0F2, transparent: true, opacity: .22, roughness: .1, depthWrite: false });
+const SIYAH = mat(0x1F1A17, { roughness: .5 });
+
+function kutu(w, h, d, m, x, y, z, golge = true) {
+  const k = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
+  k.position.set(x, y, z); k.castShadow = golge; k.receiveShadow = true; scene.add(k); return k;
+}
+
+function ahsapDoku() {
+  const c = document.createElement('canvas'); c.width = 512; c.height = 512; const g = c.getContext('2d');
+  const tonlar = ['#D9A066', '#D49A5E', '#DDA770', '#CF9558', '#D8A36A'];
+  for (let y = 0; y < 512; y += 32) {
+    let x = -(y * 37 % 160);
+    while (x < 512) {
+      const w = 140 + ((x * 13 + y) % 120);
+      g.fillStyle = tonlar[Math.abs((x + y * 3) / 7 | 0) % tonlar.length]; g.fillRect(x, y, w, 32);
+      g.fillStyle = 'rgba(120,70,30,.18)'; g.fillRect(x, y, 2, 32);
+      x += w;
+    }
+    g.fillStyle = 'rgba(120,70,30,.22)'; g.fillRect(0, y, 512, 1.5);
+  }
+  const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(7, 4); t.anisotropy = 4;
+  return t;
+}
+
+function camDuvar(x1, z1, x2, z2, h = 1.9, kapi = null) {
+  // kapi: [baslangic, bitis] duvar boyunca 0..L aralığında boşluk
+  const L = Math.hypot(x2 - x1, z2 - z1), dx = (x2 - x1) / L, dz = (z2 - z1) / L, aci = -Math.atan2(dz, dx);
+  const parcalar = kapi ? [[0, kapi[0]], [kapi[1], L]] : [[0, L]];
+  for (const [a, b] of parcalar) {
+    const l = b - a; if (l <= .05) continue;
+    const m = (a + b) / 2, cx = x1 + dx * m, cz = z1 + dz * m;
+    const g = new THREE.Mesh(new THREE.BoxGeometry(l, h, .05), CAM); g.position.set(cx, h / 2, cz); g.rotation.y = aci; scene.add(g);
+    const ust = new THREE.Mesh(new THREE.BoxGeometry(l, .06, .08), SIYAH); ust.position.set(cx, h, cz); ust.rotation.y = aci; scene.add(ust);
+    const alt = new THREE.Mesh(new THREE.BoxGeometry(l, .05, .07), SIYAH); alt.position.set(cx, .03, cz); alt.rotation.y = aci; scene.add(alt);
+    const n = Math.max(1, Math.round(l / 1.6));
+    for (let k = 0; k <= n; k++) {
+      const s = a + l * k / n;
+      const p = new THREE.Mesh(new THREE.BoxGeometry(.06, h, .07), SIYAH);
+      p.position.set(x1 + dx * s, h / 2, z1 + dz * s); scene.add(p);
+    }
+  }
+}
+
+function bitki(x, z, s = 1) {
+  kutu(.5 * s, .5 * s, .5 * s, mat(0xC97B5A), x, .25 * s, z);
+  const yaprak = mat(0x5E8C4F);
+  [[0, 1, 0, .38], [.2, .85, .15, .3], [-.2, .9, -.1, .28], [.05, 1.25, -.12, .26]].forEach(([a, b, c, r]) => {
+    const y = new THREE.Mesh(new THREE.SphereGeometry(r * s, 10, 8), yaprak); y.position.set(x + a * s, b * s, z + c * s); y.castShadow = true; scene.add(y);
+  });
+}
+
+function pencere(x, y, z, w, h, eksen = 'x') {
+  const cam = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat(0xCFE3EA, { roughness: .2, emissive: 0x9FC3CF, emissiveIntensity: .25 }));
+  cam.position.set(x, y, z); if (eksen === 'z') cam.rotation.y = Math.PI / 2; scene.add(cam);
+  const t = .07;
+  const yatay = (yy) => { const b = new THREE.Mesh(new THREE.BoxGeometry(eksen === 'x' ? w : t, t, eksen === 'x' ? t : w), SIYAH); b.position.set(x, yy, z); scene.add(b); };
+  const dikey = (o) => { const b = new THREE.Mesh(new THREE.BoxGeometry(t, h, t), SIYAH); b.position.set(eksen === 'x' ? x + o : x, y, eksen === 'x' ? z : z + o); scene.add(b); };
+  yatay(y - h / 2); yatay(y + h / 2); yatay(y + h * .1);
+  [-w / 2, -w / 6, w / 6, w / 2].forEach(dikey);
+}
+
+function tabloDoku(tur) {
+  const c = document.createElement('canvas'); c.width = 128; c.height = 160; const g = c.getContext('2d');
+  g.fillStyle = '#FFFAED'; g.fillRect(0, 0, 128, 160);
+  if (tur === 0) { g.fillStyle = '#E75F27'; g.fillRect(28, 40, 72, 50); g.fillStyle = '#2D402E'; g.fillRect(40, 90, 16, 40); g.fillRect(72, 90, 16, 40); }
+  else if (tur === 1) { g.fillStyle = '#EE8A84'; g.beginPath(); g.arc(64, 70, 34, 0, 7); g.fill(); g.fillStyle = '#7A6FD0'; g.beginPath(); g.arc(64, 112, 26, Math.PI, 0); g.fill(); }
+  else { g.globalAlpha = .75; g.fillStyle = '#F2A541'; g.beginPath(); g.arc(50, 64, 40, 0, 7); g.fill(); g.fillStyle = '#EE8A84'; g.beginPath(); g.arc(80, 100, 36, 0, 7); g.fill(); }
+  return new THREE.CanvasTexture(c);
+}
+
+function tablo(x, y, z, tur, w = 1, h = 1.25, eksen = 'x') {
+  const cerceve = new THREE.Mesh(new THREE.BoxGeometry(eksen === 'x' ? w + .12 : .05, h + .12, eksen === 'x' ? .05 : w + .12), SIYAH);
+  cerceve.position.set(x, y, z); scene.add(cerceve);
+  const p = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: tabloDoku(tur) }));
+  p.position.set(eksen === 'x' ? x : x + .04, y, eksen === 'x' ? z + .04 : z); if (eksen === 'z') p.rotation.y = Math.PI / 2; scene.add(p);
+}
+
+function tabelaDoku() {
+  const c = document.createElement('canvas'); c.width = 1024; c.height = 256; const g = c.getContext('2d');
+  g.fillStyle = '#2D402E'; g.fillRect(0, 0, 1024, 256);
+  g.fillStyle = '#E75F27'; g.beginPath(); g.arc(128, 128, 84, 0, 7); g.fill();
+  g.fillStyle = '#FFFAED'; g.font = 'italic 600 120px "Libre Bodoni", Georgia, serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('a', 128, 120);
+  g.textAlign = 'left'; g.font = '600 112px Poppins, sans-serif'; g.fillText('atölye', 250, 132);
+  g.fillStyle = '#E75F27'; g.font = 'italic 600 120px "Libre Bodoni", Georgia, serif'; g.fillText('afife', 640, 126);
+  const t = new THREE.CanvasTexture(c); t.anisotropy = 4; return t;
+}
+
+const TENLER = [0xF2C9A0, 0xD9A27A, 0xA86B4C, 0xF5D6B8, 0xE3B48C];
+const SACLAR = [0x2B211C, 0x5A3A26, 0xE8C27A, 0x1F1A17, 0xB8542E, 0x3A2A22];
+function insan(renk, i) {
+  const g = new THREE.Group();
+  const govdeMat = mat(renk, { emissive: new THREE.Color(renk), emissiveIntensity: 0 });
+  // sandalye
+  const s1 = new THREE.Mesh(new THREE.BoxGeometry(.72, .08, .7), SIYAH); s1.position.set(0, .5, -.05);
+  const s2 = new THREE.Mesh(new THREE.BoxGeometry(.72, .85, .08), SIYAH); s2.position.set(0, .95, -.42);
+  const s3 = new THREE.Mesh(new THREE.CylinderGeometry(.04, .04, .5), SIYAH); s3.position.set(0, .25, -.05);
+  // gövde, kollar, baş
+  const govde = new THREE.Mesh(new THREE.CylinderGeometry(.3, .38, .78, 16), govdeMat); govde.position.y = .93;
+  const kolMat = govdeMat;
+  const k1 = new THREE.Mesh(new THREE.BoxGeometry(.15, .15, .56), kolMat); k1.position.set(-.32, 1.02, .24);
+  const k2 = k1.clone(); k2.position.x = .32;
+  const ten = mat(TENLER[i % TENLER.length]);
+  const bas = new THREE.Mesh(new THREE.SphereGeometry(.34, 20, 16), ten); bas.position.y = 1.58;
+  const sac = new THREE.Mesh(new THREE.SphereGeometry(.36, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2.1), mat(SACLAR[(i * 5) % SACLAR.length]));
+  sac.position.y = 1.6; sac.rotation.x = -.35;
+  const gozMat = mat(0x1F1A17);
+  const g1 = new THREE.Mesh(new THREE.SphereGeometry(.035, 8, 6), gozMat); g1.position.set(-.11, 1.57, .31);
+  const g2 = g1.clone(); g2.position.x = .11;
+  g.add(s1, s2, s3, govde, k1, k2, bas, sac, g1, g2);
+  if (i % 3 === 1) { const topuz = new THREE.Mesh(new THREE.SphereGeometry(.15, 12, 10), sac.material); topuz.position.set(0, 1.95, -.12); g.add(topuz); }
+  if (i % 4 === 2) { const sapka = new THREE.Mesh(new THREE.CylinderGeometry(.3, .37, .2, 16), mat(new THREE.Color(renk).multiplyScalar(.7))); sapka.position.y = 1.85; g.add(sapka); }
+  g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  return { g, govdeMat, kollar: [k1, k2], bas };
+}
+
+function masa(cx, cz, uzun, renk) {
+  const ust = kutu(uzun, .08, 1.5, mat(0xDDA56C, { roughness: .6 }), cx, .76, cz);
+  kutu(uzun - .3, .015, .07, mat(renk, { emissive: new THREE.Color(renk), emissiveIntensity: .25 }), cx, .808, cz + .05, false);
+  [[-1, -1], [-1, 1], [1, -1], [1, 1]].forEach(([a, b]) => kutu(.07, .72, .07, SIYAH, cx + a * (uzun / 2 - .15), .36, cz + b * .6));
+  return ust;
+}
+
+function lamba(cx, cz, uzun) {
+  const l = new THREE.Mesh(new THREE.CylinderGeometry(.07, .07, uzun, 10), mat(0xFFFFFF, { emissive: 0xFFF6E0, emissiveIntensity: .8 }));
+  l.rotation.z = Math.PI / 2; l.position.set(cx, 3.1, cz); scene.add(l);
+}
+
+function etiketEkle(el, pos, ox = 0, oy = 0) {
+  el.classList.add('et'); $('#etiketler').appendChild(el);
+  const k = { el, pos, ox, oy }; etiketler.push(k); return k;
+}
+
+function sahneKur() {
+  const kap = $('#sahne');
+  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  kap.appendChild(renderer.domElement);
+  scene = new THREE.Scene();
+
+  camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -200, 400);
+  camera.position.set(14 + 1, 30, 34 - .5);
+  controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.target.set(1, 0, -.5);
+  controls.enableDamping = true; controls.dampingFactor = .08;
+  controls.screenSpacePanning = true;
+  controls.minZoom = .28; controls.maxZoom = 4;
+  controls.minPolarAngle = .55; controls.maxPolarAngle = 1.15;
+  const azi = Math.atan2(14, 34); controls.minAzimuthAngle = azi - .6; controls.maxAzimuthAngle = azi + .6;
+  controls.update();
+
+  scene.add(new THREE.HemisphereLight(0xFFFFFF, 0xD9C7B0, .72));
+  const gunes = new THREE.DirectionalLight(0xFFF4E6, .75);
+  gunes.position.set(-18, 34, 22); gunes.castShadow = true;
+  gunes.shadow.mapSize.set(2048, 2048);
+  Object.assign(gunes.shadow.camera, { left: -30, right: 30, top: 24, bottom: -24, near: 1, far: 90 });
+  gunes.shadow.bias = -.0006;
+  scene.add(gunes); scene.add(new THREE.AmbientLight(0xFFFFFF, .18));
+
+  // zemin
+  const zemin = new THREE.Mesh(new THREE.PlaneGeometry(40.5, 19.5), mat(0xFFFFFF, { map: ahsapDoku(), roughness: .75 }));
+  zemin.rotation.x = -Math.PI / 2; zemin.position.set(1.25, 0, -.25); zemin.receiveShadow = true; scene.add(zemin);
+  kutu(40.5, .3, 19.5, mat(0xCFC6B8), 1.25, -.16, -.25, false);
+
+  // dış duvarlar
+  const duvar = mat(0xFBF8F3, { roughness: .95 });
+  kutu(40.7, 4, .2, duvar, 1.25, 2, -10.1, false);
+  kutu(.2, 4, 19.7, duvar, -19.1, 2, -.25, false);
+  [-15.5, -9, 9, 14].forEach(x => pencere(x, 2.25, -9.98, 3.2, 2.3, 'x'));
+  [-5.5, 3.5].forEach(z => pencere(-18.98, 2.25, z, 3.2, 2.3, 'z'));
+
+  // marka duvarı: ahşap çıtalar + tabela
+  for (let x = -1.4; x <= 5.4; x += .22) kutu(.16, 3.7, .08, mat(Math.round(x * 10) % 2 ? 0xA65D45 : 0xB2694F), x, 1.85, -9.95, false);
+  const tabela = new THREE.Mesh(new THREE.PlaneGeometry(4.8, 1.2), new THREE.MeshBasicMaterial({ map: tabelaDoku() }));
+  tabela.position.set(2, 2.5, -9.88); scene.add(tabela);
+  document.fonts && document.fonts.ready.then(() => { tabela.material.map = tabelaDoku(); tabela.material.needsUpdate = true; });
+
+  // seramik rafı (koridor sonu)
+  for (let r = 0; r < 3; r++) kutu(2.6, .06, .5, mat(0xC98B55), -17.6 + 0, .6 + r * .75, -.3, true);
+  [[-18.75, -1], [-16.45, -1], [-18.75, .4], [-16.45, .4]].forEach(([x, z]) => kutu(.05, 2.2, .05, SIYAH, x, 1.1, z * .5 - .05));
+  const vazolar = [0xE75F27, 0x6B7F61, 0xF2A541, 0xEE8A84, 0x2D402E, 0xA65D45, 0xFFFAED, 0x7A6FD0];
+  for (let r = 0; r < 3; r++) for (let k = 0; k < 4; k++) {
+    const v = new THREE.Mesh(new THREE.CylinderGeometry(.13 + (k % 2) * .05, .1, .3 + ((k + r) % 3) * .08, 12), mat(vazolar[(r * 4 + k) % vazolar.length], { roughness: .4 }));
+    v.position.set(-18.6 + k * .62, .8 + r * .75, -.3); v.castShadow = true; scene.add(v);
+  }
+
+  // departman odaları
+  OFIS.departmanlar.forEach((d, i) => {
+    const cx = KOLON[i % 3], cz = SATIR[Math.floor(i / 3)], ust = Math.floor(i / 3) === 0;
+    const x0 = cx - ODA_W / 2, x1 = cx + ODA_W / 2, z0 = cz - ODA_D / 2, z1 = cz + ODA_D / 2;
+    const oz = new THREE.Mesh(new THREE.PlaneGeometry(ODA_W, ODA_D), mat(0xEEEAE3, { roughness: .9 }));
+    oz.rotation.x = -Math.PI / 2; oz.position.set(cx, .012, cz); oz.receiveShadow = true; scene.add(oz);
+    kutu(1.8, .02, .12, mat(d.renk, { emissive: new THREE.Color(d.renk), emissiveIntensity: .4 }), x0 + 1.5, .02, ust ? z1 : z0, false);
+    camDuvar(x0, z0, x1, z0, 1.9, ust ? null : [.6, 2.4]);
+    camDuvar(x0, z1, x1, z1, 1.9, ust ? [.6, 2.4] : null);
+    camDuvar(x0, z0, x0, z1); camDuvar(x1, z0, x1, z1);
+    masa(cx, cz - .15, 7.4, d.renk);
+    lamba(cx, cz - .15, 6.5);
+    bitki(x1 - .6, ust ? z0 + .6 : z1 - .6, .8);
+    const el = document.createElement('div'); el.className = 'et-dep';
+    el.innerHTML = `<i style="background:${d.renk}"></i>${esc(d.ad)}`;
+    etiketEkle(el, new THREE.Vector3(x0 + .2, 2.15, z0), 0, 0);
+    d.merkez = new THREE.Vector3(cx, 0, cz);
+  });
+
+  // genel müdür odası
+  const gx0 = 12.6, gx1 = 21.3, gz0 = -10, gz1 = -3;
+  const go = new THREE.Mesh(new THREE.PlaneGeometry(gx1 - gx0, gz1 - gz0), mat(0xE9E2D6, { roughness: .9 }));
+  go.rotation.x = -Math.PI / 2; go.position.set((gx0 + gx1) / 2, .012, (gz0 + gz1) / 2); go.receiveShadow = true; scene.add(go);
+  camDuvar(gx0, gz1, gx1, gz1, 1.9, [.6, 2.4]); camDuvar(gx0, gz0 + .1, gx0, gz1); camDuvar(gx1, gz0 + .1, gx1, gz1);
+  kutu(3.2, .08, 1.5, mat(0xA65D45, { roughness: .5 }), 17.2, .76, -6.6);
+  kutu(3, .7, .06, mat(0x8E4E39), 17.2, .38, -5.9);
+  for (let r = 0; r < 4; r++) kutu(1.8, .05, .45, mat(0xC98B55), 14, .4 + r * .6, -9.6);
+  [[13.15, -9.8], [14.85, -9.8], [13.15, -9.4], [14.85, -9.4]].forEach(([x, z]) => kutu(.05, 2.3, .05, SIYAH, x, 1.15, z));
+  for (let k = 0; k < 6; k++) kutu(.12, .35, .3, mat([0xE75F27, 0x2D402E, 0xF2A541, 0x6B7F61][k % 4]), 13.4 + k * .2, 1.6 + (k > 2 ? .6 : 0) - .22, -9.6);
+  tablo(18, 2.3, -9.97, 0); tablo(19.6, 2.15, -9.97, 1, .85, 1);
+  bitki(20.6, -9.3, .9);
+  const gmEl = document.createElement('div'); gmEl.className = 'et-dep';
+  gmEl.innerHTML = `<i style="background:#E75F27"></i>Yönetim`;
+  etiketEkle(gmEl, new THREE.Vector3(gx0 + .2, 2.15, -3.2));
+
+  // dinlenme köşesi
+  const hali = new THREE.Mesh(new THREE.CylinderGeometry(2.9, 2.9, .02, 48), mat(0xF1DFC9));
+  hali.position.set(17, .02, 4.6); hali.receiveShadow = true; scene.add(hali);
+  const kanepe = mat(0x2D402E, { roughness: .9 });
+  kutu(3.4, .45, 1.1, kanepe, 17, .32, 2.2); kutu(3.4, .75, .3, kanepe, 17, .7, 1.75); kutu(.3, .6, 1.1, kanepe, 15.35, .5, 2.2); kutu(.3, .6, 1.1, kanepe, 18.65, .5, 2.2);
+  const koltuk = mat(0xE75F27, { roughness: .85 });
+  [[14.4, 5.3], [19.6, 5.3]].forEach(([x, z]) => { kutu(1.1, .45, 1.1, koltuk, x, .32, z); kutu(1.1, .7, .25, koltuk, x + (x < 17 ? -.42 : .42), .65, z); });
+  const sehpa = new THREE.Mesh(new THREE.CylinderGeometry(.85, .85, .07, 32), mat(0xDDA56C)); sehpa.position.set(17, .5, 4.6); sehpa.castShadow = true; scene.add(sehpa);
+  kutu(.08, .46, .08, SIYAH, 17, .25, 4.6);
+  [[16.7, 4.5, 0xEE8A84], [17.2, 4.8, 0x6B7F61], [17.4, 4.3, 0xFFFAED]].forEach(([x, z, c]) => { const v = new THREE.Mesh(new THREE.CylinderGeometry(.12, .09, .3, 12), mat(c, { roughness: .4 })); v.position.set(x, .69, z); v.castShadow = true; scene.add(v); });
+  // şövale
+  const sov = mat(0x8E4E39);
+  const a1 = kutu(.07, 2.4, .07, sov, 20.3, 1.15, 8); a1.rotation.z = .12;
+  const a2 = kutu(.07, 2.4, .07, sov, 21, 1.15, 8); a2.rotation.z = -.12;
+  const tuval = new THREE.Mesh(new THREE.PlaneGeometry(1.25, 1.5), new THREE.MeshBasicMaterial({ map: tabloDoku(2) }));
+  tuval.position.set(20.65, 1.6, 8.06); scene.add(tuval);
+  bitki(13.3, 8.6, 1.1); bitki(21, .4, 1);
+
+  // çalışanlar
+  OFIS.ajanlar.forEach((a, idx) => {
+    let pos, renk;
+    if (a.departman === 'yonetim') {
+      renk = GM_RENK; pos = new THREE.Vector3(17.2, 0, -7.55);
+    } else {
+      const di = OFIS.departmanlar.findIndex(d => d.id === a.departman);
+      const d = OFIS.departmanlar[di]; renk = d.renk;
+      const ekip = OFIS.ajanlar.filter(x => x.departman === a.departman);
+      const k = ekip.indexOf(a), n = ekip.length;
+      const ofset = (k - (n - 1) / 2) * 2.45;
+      pos = new THREE.Vector3(KOLON[di % 3] + ofset, 0, SATIR[Math.floor(di / 3)] - 1.2);
+    }
+    const ins = insan(renk, idx + 1);
+    ins.g.position.copy(pos); scene.add(ins.g);
+    ins.g.traverse(o => { if (o.isMesh) { o.userData.ajan = a.id; tiklanabilir.push(o); } });
+    // dizüstü
+    kutu(.62, .03, .42, mat(0xB9BDC1, { roughness: .4 }), pos.x, .815, pos.z + .85, false);
+    const ekran = kutu(.62, .4, .03, mat(0x9DA3A8, { roughness: .4 }), pos.x, 1.02, pos.z + 1.08, false); ekran.rotation.x = -.18;
+
+    const el = document.createElement('button'); el.type = 'button';
+    el.className = 'et-ajan' + (a.departman === 'yonetim' ? ' gm' : '');
+    el.innerHTML = `<i style="background:${a.departman === 'yonetim' ? '#E75F27' : renk}"></i>${esc(a.ad)}${a.zamanlama ? `<small>${esc(a.zamanlama.saat)}</small>` : ''}`;
+    el.addEventListener('click', () => { turuDurdur(); kartAc(a.id, true); });
+    const et = etiketEkle(el, new THREE.Vector3(pos.x - .2, .82, pos.z + 1.95));
+    AJAN[a.id] = { ...a, renk, pos, ins, et, balon: null, calisiyor: false };
+  });
+
+  raycaster = new THREE.Raycaster(); isaretci = new THREE.Vector2();
+  let basla = null;
+  renderer.domElement.addEventListener('pointerdown', e => { basla = [e.clientX, e.clientY]; });
+  renderer.domElement.addEventListener('pointerup', e => {
+    if (!basla || Math.hypot(e.clientX - basla[0], e.clientY - basla[1]) > 5) return;
+    const r = renderer.domElement.getBoundingClientRect();
+    isaretci.set((e.clientX - r.left) / r.width * 2 - 1, -(e.clientY - r.top) / r.height * 2 + 1);
+    raycaster.setFromCamera(isaretci, camera);
+    const h = raycaster.intersectObjects(tiklanabilir, false)[0];
+    if (h) { turuDurdur(); kartAc(h.object.userData.ajan, true); }
+  });
+
+  boyutla(true);
+  addEventListener('resize', () => boyutla(false));
+}
+
+function boyutla(ilk) {
+  const w = innerWidth, h = innerHeight, oran = w / h, yuk = 24;
+  renderer.setSize(w, h);
+  Object.assign(camera, { left: -yuk * oran / 2, right: yuk * oran / 2, top: yuk / 2, bottom: -yuk / 2 });
+  if (ilk) camera.zoom = Math.max(.3, Math.min(1.15, (yuk * oran) / 44));
+  camera.updateProjectionMatrix();
+}
+
+const gecici = new THREE.Vector3();
+function etiketGuncelle() {
+  const w = innerWidth, h = innerHeight;
+  const uzak = h / (camera.top - camera.bottom) * camera.zoom < 24;
+  if (uzak !== etiketGuncelle.uzak) { $('#etiketler').classList.toggle('uzak', uzak); etiketGuncelle.uzak = uzak; }
+  for (const k of etiketler) {
+    gecici.copy(k.pos).project(camera);
+    const x = (gecici.x + 1) / 2 * w + k.ox, y = (1 - gecici.y) / 2 * h + k.oy;
+    k.el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)${k.donus || ''}`;
+  }
+}
+
+function kameraOdakla(hedef, zoom) {
+  if (azHareket) { controls.target.copy(hedef); camera.zoom = zoom; camera.updateProjectionMatrix(); controls.update(); return; }
+  kameraHedef = { from: controls.target.clone(), to: hedef.clone(), fromZoom: camera.zoom, toZoom: zoom, t0: performance.now(), sure: 900 };
+}
+
+function ucur(kimden, kime) {
+  const a = AJAN[kimden].pos.clone().setY(1.6), b = AJAN[kime].pos.clone().setY(1.6);
+  if (azHareket) return;
+  const kag = new THREE.Mesh(new THREE.BoxGeometry(.45, .05, .6), mat(0xFFFAED, { emissive: 0xE75F27, emissiveIntensity: .35 }));
+  const ser = new THREE.Mesh(new THREE.BoxGeometry(.47, .02, .1), mat(0xE75F27)); ser.position.set(0, .04, -.18); kag.add(ser);
+  kag.castShadow = true; scene.add(kag);
+  ucanlar.push({ m: kag, a, b, t0: performance.now(), sure: 1300 });
+}
+
+function dongu(t) {
+  requestAnimationFrame(dongu);
+  if (kameraHedef) {
+    const k = Math.min(1, (performance.now() - kameraHedef.t0) / kameraHedef.sure), e = 1 - Math.pow(1 - k, 3);
+    controls.target.lerpVectors(kameraHedef.from, kameraHedef.to, e);
+    camera.zoom = kameraHedef.fromZoom + (kameraHedef.toZoom - kameraHedef.fromZoom) * e; camera.updateProjectionMatrix();
+    if (k >= 1) kameraHedef = null;
+  }
+  ucanlar = ucanlar.filter(u => {
+    const k = Math.min(1, (performance.now() - u.t0) / u.sure);
+    u.m.position.lerpVectors(u.a, u.b, k); u.m.position.y += Math.sin(Math.PI * k) * 4.5;
+    u.m.rotation.y = k * Math.PI * 2;
+    if (k >= 1) { scene.remove(u.m); return false; }
+    return true;
+  });
+  const s = (t || 0) / 1000;
+  for (const id in AJAN) {
+    const A = AJAN[id];
+    if (A.calisiyor) {
+      A.ins.govdeMat.emissiveIntensity = .25 + Math.sin(s * 5) * .15;
+      if (!azHareket) { A.ins.kollar[0].position.y = 1.02 + Math.sin(s * 18) * .03; A.ins.kollar[1].position.y = 1.02 + Math.cos(s * 18) * .03; A.ins.bas.rotation.x = Math.sin(s * 2) * .08; }
+    } else if (A.ins.govdeMat.emissiveIntensity) { A.ins.govdeMat.emissiveIntensity = 0; }
+  }
+  controls.update();
+  renderer.render(scene, camera);
+  etiketGuncelle();
+}
+
+/* ======================= Baloncuk ve durum ======================= */
+function balon(id, html, tur = '', ms = 0) {
+  const A = AJAN[id]; if (!A) return;
+  if (A.balon) { A.balon.el.remove(); etiketler.splice(etiketler.indexOf(A.balon), 1); A.balon = null; }
+  if (!html) return;
+  const el = document.createElement('div'); el.className = 'balon ' + tur; el.innerHTML = html;
+  const k = etiketEkle(el, A.pos.clone().setY(2.35)); k.donus = ' translate(-50%, -100%)'; A.balon = k;
+  if (ms) setTimeout(() => { if (A.balon === k) balon(id, null); }, ms);
+}
+const YAZIYOR = '<span class="yaziyor" aria-label="çalışıyor"><i></i><i></i><i></i></span>';
+function calisiyorYap(id, acik) {
+  const A = AJAN[id]; if (!A) return;
+  A.calisiyor = acik; A.et.el.classList.toggle('aktif', acik);
+}
+
+/* ======================= Arayüz ======================= */
+function arayuzKur() {
+  const dep = $('#departmanlar');
+  OFIS.departmanlar.forEach(d => {
+    DEP[d.id] = d;
+    const n = OFIS.ajanlar.filter(a => a.departman === d.id).length;
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'dep-cip';
+    b.innerHTML = `<i style="background:${d.renk}"></i>${esc(d.ad)} <b>${n}</b>`;
+    b.addEventListener('click', () => { turuDurdur(); kameraOdakla(d.merkez, 1.9); });
+    dep.appendChild(b);
+  });
+  $('#sayac').textContent = `${OFIS.ajanlar.length} çalışan · ${OFIS.departmanlar.length} departman`;
+
+  const sec = $('#komut-kime');
+  const gm = OFIS.ajanlar.find(a => a.departman === 'yonetim');
+  OFIS.departmanlar.forEach(d => {
+    const og = document.createElement('optgroup'); og.label = d.ad;
+    OFIS.ajanlar.filter(a => a.departman === d.id).forEach(a => { const o = document.createElement('option'); o.value = a.id; o.textContent = a.ad; og.appendChild(o); });
+    sec.appendChild(og);
+  });
+
+  SIRA = [gm, ...OFIS.ajanlar.filter(a => a !== gm)].map(a => a.id);
+
+  $('#komut').addEventListener('submit', e => { e.preventDefault(); gorevVer(); });
+  $('#komut-metin').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); gorevVer(); } });
+  $('#kart-kapat').addEventListener('click', () => { turuDurdur(); $('#kart').hidden = true; });
+  $('#kart-gorev').addEventListener('click', () => { $('#komut-kime').value = acikKart; $('#komut-metin').focus(); });
+  $('#tus-tur').addEventListener('click', () => (tur.acik ? turuDurdur() : turuBaslat()));
+  $('#tur-ileri').addEventListener('click', () => turAdim(1));
+  $('#tur-geri').addEventListener('click', () => turAdim(-1));
+  $('#tur-dur').addEventListener('click', () => (tur.zamanlayici ? turuDurdur(true) : turuBaslat(true)));
+  $('#tus-takvim').addEventListener('click', () => panelAc('takvim'));
+  $('#tus-akis').addEventListener('click', () => panelAc('akis'));
+  $('#panel-kapat').addEventListener('click', () => panelAc(null));
+  $('#rapor-kapat').addEventListener('click', raporKapat);
+  $('#perde').addEventListener('click', e => { if (e.target.id === 'perde') raporKapat(); });
+  addEventListener('keydown', e => { if (e.key === 'Escape') { if (!$('#perde').hidden) raporKapat(); else { turuDurdur(); $('#kart').hidden = true; } } });
+}
+
+let acikKart = null;
+async function kartAc(id, odakla) {
+  const A = AJAN[id]; if (!A) return;
+  acikKart = id;
+  const d = DEP[A.departman];
+  $('#kart-nokta').style.background = A.departman === 'yonetim' ? '#E75F27' : A.renk;
+  $('#kart-dep').textContent = d ? d.ad : 'Yönetim';
+  $('#kart-sira').textContent = `${SIRA.indexOf(id) + 1} / ${SIRA.length}`;
+  $('#kart-ad').textContent = A.ad;
+  $('#kart-aciklama').textContent = A.aciklama;
+  $('#kart-baglanti').innerHTML = A.baglantilar.map(b => `<span class="cip">${esc(b)}</span>`).join('');
+  const z = $('#kart-zaman');
+  z.hidden = !A.zamanlama;
+  if (A.zamanlama) z.innerHTML = `<b>${esc(A.zamanlama.saat)}</b> ${esc(zamanMetni(A.zamanlama))} kendiliğinden çalışır`;
+  $('#kart-model').textContent = modelAd(A.model);
+  $('#kart-ilerleme').style.background = A.departman === 'yonetim' ? '#E75F27' : A.renk;
+  $('#kart-gorev').hidden = A.departman === 'yonetim';
+  $('#tur-dur').textContent = tur.zamanlayici ? '⏸' : '▶';
+  const cl = $('#kart-ciktilar'); cl.innerHTML = '';
+  $('#kart').hidden = false;
+  if (odakla) kameraOdakla(A.pos.clone().add(new THREE.Vector3(0, 0, 1)), 2.3);
+  if (canli) {
+    try {
+      const liste = await (await fetch('/api/ciktilar/' + id)).json();
+      if (acikKart !== id) return;
+      cl.innerHTML = liste.slice(0, 3).map(f => `<button type="button" data-yol="${esc(f.yol)}">${esc(f.ad)}</button>`).join('');
+      cl.querySelectorAll('button').forEach(b => b.addEventListener('click', () => raporGetir(id, b.dataset.yol)));
+    } catch {}
+  }
+}
+
+/* ---- Ofis turu ---- */
+const tur = { acik: false, i: 0, zamanlayici: null, t0: 0 };
+const TUR_SURE = 4500;
+function turuBaslat(devam) {
+  tur.acik = true; if (!devam) tur.i = 0;
+  $('#tus-tur').textContent = '■ Turu bitir';
+  kartAc(SIRA[tur.i], true);
+  clearInterval(tur.zamanlayici);
+  tur.t0 = performance.now();
+  tur.zamanlayici = setInterval(() => {
+    const k = (performance.now() - tur.t0) / TUR_SURE;
+    $('#kart-ilerleme').style.width = Math.min(100, k * 100) + '%';
+    if (k >= 1) turAdim(1, true);
+  }, 50);
+  $('#tur-dur').textContent = '⏸';
+}
+function turAdim(y, oto) {
+  tur.i = (tur.i + y + SIRA.length) % SIRA.length; tur.t0 = performance.now();
+  if (!oto && !tur.zamanlayici) $('#kart-ilerleme').style.width = '0';
+  if (!tur.acik) tur.i = (SIRA.indexOf(acikKart) + y + SIRA.length) % SIRA.length;
+  kartAc(SIRA[tur.i], true);
+}
+function turuDurdur(sadeceDuraklat) {
+  clearInterval(tur.zamanlayici); tur.zamanlayici = null;
+  $('#tur-dur').textContent = '▶';
+  if (!sadeceDuraklat) { tur.acik = false; $('#tus-tur').textContent = '▶ Ofisi gez'; $('#kart-ilerleme').style.width = '0'; }
+}
+
+/* ---- Paneller ---- */
+let panelTuru = null;
+const akis = [];
+function panelAc(tip) {
+  panelTuru = panelTuru === tip ? null : tip;
+  $('#panel').hidden = !panelTuru;
+  $('#tus-takvim').setAttribute('aria-pressed', panelTuru === 'takvim');
+  $('#tus-akis').setAttribute('aria-pressed', panelTuru === 'akis');
+  panelCiz();
+}
+function panelCiz() {
+  if (!panelTuru) return;
+  const ic = $('#panel-ic');
+  if (panelTuru === 'takvim') {
+    const z = OFIS.ajanlar.filter(a => a.zamanlama).sort((a, b) => a.zamanlama.saat.localeCompare(b.zamanlama.saat));
+    $('#panel-baslik').innerHTML = `Zamanlanmış işler<small>${z.length} iş</small>`;
+    ic.innerHTML = z.map(a => `<button class="satir" type="button" data-id="${a.id}">
+      <div class="saat">${esc(a.zamanlama.saat)}<small>${esc(zamanMetni(a.zamanlama))}</small></div>
+      <div style="min-width:0"><strong><i style="background:${AJAN[a.id].renk}"></i>${esc(a.ad)}</strong><span>${esc(a.zamanlama.gorev)}</span></div></button>`).join('')
+      + `<p class="akis-bos">Saat geldiğinde sunucu (node server.js) açıksa iş kendiliğinden başlar.${canli ? '' : ' Şu an demo modundasınız.'}</p>`;
+    ic.querySelectorAll('.satir').forEach(b => b.addEventListener('click', () => { turuDurdur(); kartAc(b.dataset.id, true); }));
+  } else {
+    $('#panel-baslik').innerHTML = `Akış<small>${canli ? 'canlı' : 'demo'}</small>`;
+    ic.innerHTML = akis.length ? akis.slice().reverse().map((k, i) => `<div class="akis-satir ${k.hata ? 'hata' : ''}">
+      <time>${saatYaz(k.t)}</time><div><b>${esc(k.kim)}</b> ${esc(k.mesaj)}${k.rapor ? `<br><button type="button" data-i="${akis.length - 1 - i}">Raporu aç</button>` : ''}</div></div>`).join('')
+      : '<p class="akis-bos">Henüz iş yok. Aşağıdaki kutuya bir görev yazın.</p>';
+    ic.querySelectorAll('button[data-i]').forEach(b => b.addEventListener('click', () => akis[b.dataset.i].rapor()));
+  }
+}
+function akisEkle(kim, mesaj, ek = {}) {
+  akis.push({ t: new Date(), kim, mesaj, ...ek });
+  if (akis.length > 80) akis.shift();
+  if (panelTuru === 'akis') panelCiz();
+}
+
+/* ---- Rapor ---- */
+function raporAc(ajanId, metin, ornek) {
+  const A = AJAN[ajanId];
+  const satirlar = metin.replace(/\r/g, '').split('\n');
+  let baslik = A.ad, i = 0;
+  while (i < satirlar.length && !satirlar[i].trim()) i++;
+  if (/^#\s+/.test(satirlar[i] || '')) { baslik = satirlar[i].replace(/^#\s+/, ''); i++; }
+  while (i < satirlar.length && !satirlar[i].trim()) i++;
+  let ozet = '';
+  if (satirlar[i] && !/^(#|\||\s*[-*]\s|\s*\d+\.)/.test(satirlar[i])) { ozet = satirlar[i]; i++; }
+  $('#rapor-bas').style.background = `linear-gradient(135deg, ${A.renk}, color-mix(in srgb, ${A.renk} 70%, #1F1A17))`;
+  $('#rapor-ust').textContent = `${A.ad} · ${DEP[A.departman] ? DEP[A.departman].ad : 'Yönetim'}`;
+  $('#rapor-baslik').textContent = baslik;
+  $('#rapor-tarih').textContent = new Date().toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' });
+  $('#rapor-ornek').hidden = !ornek;
+  $('#rapor-ic').innerHTML = (ozet ? `<p class="ozet">${inl(ozet)}</p>` : '') + md(satirlar.slice(i).join('\n'));
+  $('#perde').hidden = false;
+  $('#rapor-kapat').focus();
+}
+function raporKapat() { $('#perde').hidden = true; }
+async function raporGetir(ajanId, yol) {
+  try {
+    const r = await fetch(yol); if (!r.ok) throw new Error(r.status);
+    raporAc(ajanId, await r.text(), false);
+  } catch (e) { akisEkle(AJAN[ajanId].ad, 'raporu açamadım: ' + e.message, { hata: true }); }
+}
+
+/* ======================= Görev akışı ======================= */
+function olay(o) {
+  const A = AJAN[o.ajan], ad = A ? A.ad : '';
+  switch (o.tip) {
+    case 'dusunuyor':
+      calisiyorYap('genel-mudur', true);
+      balon('genel-mudur', esc(o.mesaj || 'Bu iş kime gider, düşünüyorum…'));
+      akisEkle('Genel Müdür', 'işi okuyor');
+      kameraOdakla(AJAN['genel-mudur'].pos.clone().add(new THREE.Vector3(0, 0, 1)), 1.9);
+      break;
+    case 'devir':
+      calisiyorYap('genel-mudur', false);
+      balon('genel-mudur', `İşi <b>${esc(ad)}</b>'a veriyorum.`, '', 2200);
+      $('#devir-kime').textContent = ad; $('#devir').hidden = false;
+      setTimeout(() => { $('#devir').hidden = true; }, 3800);
+      ucur('genel-mudur', o.ajan);
+      akisEkle('Genel Müdür', `→ ${ad}${o.mesaj ? ' (' + o.mesaj + ')' : ''}`);
+      setTimeout(() => kameraOdakla(A.pos.clone().add(new THREE.Vector3(0, 0, 1)), 2.3), azHareket ? 0 : 500);
+      break;
+    case 'aldi':
+      balon(o.ajan, esc(o.mesaj), '', 2600);
+      akisEkle(ad, o.mesaj.toLocaleLowerCase('tr'));
+      break;
+    case 'calisiyor':
+      calisiyorYap(o.ajan, true);
+      setTimeout(() => { if (A.calisiyor) balon(o.ajan, YAZIYOR); }, 2600);
+      break;
+    case 'bitti': {
+      calisiyorYap(o.ajan, false);
+      balon(o.ajan, 'Tamamdır, hazır ✓', 'tamam', 5000);
+      const ac = o.ornek ? () => raporAc(o.ajan, o.ornek, true) : o.dosya ? () => raporGetir(o.ajan, o.dosya) : null;
+      akisEkle(ad, o.dosya ? 'raporu hazırladı' : (o.mesaj || 'işi bitirdi'), { rapor: ac });
+      if (ac) setTimeout(ac, azHareket ? 0 : 900);
+      break;
+    }
+    case 'hata':
+      for (const id in AJAN) if (AJAN[id].calisiyor) { calisiyorYap(id, false); balon(id, 'Bir sorun çıktı', 'hata', 4000); }
+      akisEkle(ad || 'Ofis', o.mesaj, { hata: true });
+      if (panelTuru !== 'akis') panelAc('akis');
+      break;
+    case 'kuyruk':
+      if (o.sira > 1) akisEkle('Ofis', `iş sıraya alındı (${o.sira}. sırada)`);
+      break;
+    case 'not':
+      akisEkle(ad || 'Ofis', o.mesaj);
+      break;
+  }
+}
+
+function anahtarla(metin) {
+  const m = metin.toLocaleLowerCase('tr');
+  let en = null, puan = 0;
+  for (const a of OFIS.ajanlar) {
+    const p = (a.anahtar || []).reduce((s, k) => s + (m.includes(k) ? k.length : 0), 0);
+    if (p > puan) { puan = p; en = a; }
+  }
+  return en ? en.id : 'strateji-kocu';
+}
+
+async function demoCalistir(metin, kime) {
+  const yeni = kime || 'genel-mudur';
+  balon(yeni, 'Yeni iş geldi!', 'yeni', 1400);
+  await bekle(1200);
+  let hedef = kime;
+  if (!hedef) {
+    olay({ tip: 'dusunuyor', ajan: 'genel-mudur' });
+    await bekle(1900);
+    hedef = anahtarla(metin);
+    olay({ tip: 'devir', ajan: hedef, mesaj: 'anahtar kelimeye göre' });
+    await bekle(1500);
+  } else {
+    kameraOdakla(AJAN[hedef].pos.clone().add(new THREE.Vector3(0, 0, 1)), 2.3);
+  }
+  olay({ tip: 'aldi', ajan: hedef, mesaj: 'Görevi aldım: ' + (metin.length > 70 ? metin.slice(0, 70) + '…' : metin) });
+  olay({ tip: 'calisiyor', ajan: hedef });
+  await bekle(4200);
+  olay({ tip: 'bitti', ajan: hedef, ornek: ORNEK[hedef] || genelOrnek(AJAN[hedef], metin) });
+}
+
+let mesgul = false;
+async function gorevVer() {
+  const metin = $('#komut-metin').value.trim();
+  const kime = $('#komut-kime').value;
+  if (!metin) { $('#komut-metin').focus(); return; }
+  turuDurdur(); $('#kart').hidden = true;
+  const demo = $('#komut-demo').checked || !canli;
+  if (demo) {
+    if (mesgul) return;
+    mesgul = true; $('#komut-gonder').disabled = true;
+    try { await demoCalistir(metin, kime); } finally { mesgul = false; $('#komut-gonder').disabled = false; }
+  } else {
+    try {
+      const r = await fetch('/api/gorev', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ metin, kime: kime || null }) });
+      const j = await r.json(); if (!r.ok) throw new Error(j.hata || r.status);
+      balon(kime || 'genel-mudur', 'Yeni iş geldi!', 'yeni', 1600);
+      akisEkle('Siz', metin);
+    } catch (e) { akisEkle('Ofis', 'görev gönderilemedi: ' + e.message, { hata: true }); }
+  }
+  $('#komut-metin').value = '';
+}
+
+async function durumKontrol() {
+  try {
+    const ac = new AbortController(); const zt = setTimeout(() => ac.abort(), 1500);
+    const r = await fetch('/api/durum', { signal: ac.signal, cache: 'no-store' }); clearTimeout(zt);
+    canli = r.ok && (await r.json()).canli === true;
+  } catch { canli = false; }
+  const d = $('#durum');
+  d.classList.toggle('canli', canli);
+  d.querySelector('span').textContent = canli ? 'Canlı · ' + location.host : 'Demo modu';
+  $('#komut-demo').checked = !canli;
+  $('#komut-demo').disabled = !canli;
+  $('#komut-demo').parentElement.title = canli ? 'İşaretlerseniz gerçek iş yapılmaz, sadece canlandırılır.' : 'Sunucu kapalı: bilgisayarda "node server.js" çalıştırın.';
+  if (canli) {
+    const es = new EventSource('/api/olaylar');
+    es.onmessage = e => { try { olay(JSON.parse(e.data)); } catch {} };
+  }
+}
+
+async function basla() {
+  try {
+    const r = await fetch('ofis.json', { cache: 'no-store' }); if (!r.ok) throw new Error(r.status);
+    OFIS = await r.json();
+  } catch (e) {
+    document.body.insertAdjacentHTML('beforeend', `<div class="hata-ekran"><div><h2>Ofis yüklenemedi</h2><p>ofis.json okunamadı (${esc(e.message)}). Klasörde <code>node server.js</code> çalıştırıp http://127.0.0.1:4747 adresini açın.</p></div></div>`);
+    return;
+  }
+  if (!window.THREE || !THREE.OrbitControls) {
+    document.body.insertAdjacentHTML('beforeend', '<div class="hata-ekran"><p>3B kütüphanesi yüklenemedi. İnternet bağlantısını kontrol edin.</p></div>');
+    return;
+  }
+  sahneKur(); arayuzKur(); requestAnimationFrame(dongu);
+  await durumKontrol();
+  setTimeout(() => balon('genel-mudur', 'Ofis hazır. Bir görev yazın, doğru kişiye ileteyim.', '', 5000), 600);
+}
+basla();
+</script>
+</body>
+</html>

@@ -1,0 +1,138 @@
+{
+  "ad": "Afife Ofisi",
+  "marka": "atölye afife",
+  "departmanlar": [
+    { "id": "beyin",      "ad": "Beyin Takımı",          "renk": "#7A6FD0" },
+    { "id": "produksiyon","ad": "Prodüksiyon Stüdyosu",  "renk": "#E75F27" },
+    { "id": "sosyal",     "ad": "Sosyal Medya & Reklam", "renk": "#E9A23B" },
+    { "id": "analiz",     "ad": "Ölçüm & Analiz",        "renk": "#3E9C8F" },
+    { "id": "finans",     "ad": "Kayıt & Finans",        "renk": "#6B7F61" },
+    { "id": "web",        "ad": "Web & Etkinlik",        "renk": "#E07A8A" }
+  ],
+  "ajanlar": [
+    {
+      "id": "genel-mudur", "ad": "Genel Müdür", "departman": "yonetim", "model": "sonnet",
+      "aciklama": "Gelen işi okur, doğru kişiye devreder, sonucu toparlar.",
+      "baglantilar": ["Tüm ofis"],
+      "araclar": "Read",
+      "anahtar": []
+    },
+
+    {
+      "id": "icerik-avcisi", "ad": "İçerik Avcısı", "departman": "beyin", "model": "opus",
+      "aciklama": "Her sabah sanat atölyesi, çocuk sanatı ve yaratıcı drama Reels'lerini tarar; Afife'ye uyarlanacak 5 fikri seçer.",
+      "baglantilar": ["Web arama", "Higgsfield video analizi"],
+      "araclar": "Read,Write,WebSearch,WebFetch",
+      "anahtar": ["fikir", "trend", "ilham", "viral video", "ne çeksem", "ne çekelim", "içerik fikri", "reels fikri"],
+      "zamanlama": { "saat": "08:00", "gorev": "Son 24 saatte öne çıkan sanat atölyesi, çocuk sanatı, seramik ve yaratıcı drama videolarını tara. Afife tarzına en uygun 5'ini seç, her biri için Afife uyarlamasını yaz." }
+    },
+    {
+      "id": "rakip-analisti", "ad": "Rakip Analisti", "departman": "beyin", "model": "opus",
+      "aciklama": "Kadıköy ve Anadolu yakasındaki sanat atölyelerinin paylaşımlarını, kampanyalarını ve fiyatlarını izler.",
+      "baglantilar": ["Meta Reklam Kütüphanesi", "Web arama"],
+      "araclar": "Read,Write,WebSearch,WebFetch",
+      "anahtar": ["rakip", "rakipler", "diğer atölyeler", "piyasa", "fiyatlar ne"],
+      "zamanlama": { "saat": "09:00", "gunler": ["pzt"], "gorev": "Rakip atölyelerin geçen haftaki paylaşımlarını, yeni reklamlarını ve kampanyalarını raporla. Bizim için 3 fikirle bitir." }
+    },
+    {
+      "id": "strateji-kocu", "ad": "Strateji Koçu", "departman": "beyin", "model": "opus",
+      "aciklama": "Dönem hedefi, branş önceliği ve yol haritası. Doluluğu düşük branş için plan önerir.",
+      "baglantilar": ["Google Drive"],
+      "araclar": "Read,Write,WebSearch",
+      "anahtar": ["strateji", "hedef", "yol haritası", "büyüme", "öncelik", "yeni dönem planı", "ne yapmalıyız"]
+    },
+
+    {
+      "id": "reels-editoru", "ad": "Reels Editörü", "departman": "produksiyon", "model": "opus",
+      "aciklama": "Çekimlerdeki ham görüntüyü Afife tarzında Reels'e çevirir: krem zemin, suluboya lekeler, Poppins altyazı.",
+      "baglantilar": ["Google Drive · Çekimler", "tema.json"],
+      "araclar": "Read,Write,Edit,Bash",
+      "anahtar": ["kurgu", "edit", "montaj", "altyazı", "videoyu kes", "reels yap", "reels'e çevir"]
+    },
+    {
+      "id": "seslendirmen", "ad": "Seslendirmen", "departman": "produksiyon", "model": "sonnet",
+      "aciklama": "Tanıtım ve Reels için seslendirme metni yazar, ElevenLabs ile seslendirir.",
+      "baglantilar": ["ElevenLabs"],
+      "araclar": "Read,Write",
+      "anahtar": ["seslendirme", "dış ses", "voiceover", "sesli anlatım", "ses kaydı"]
+    },
+    {
+      "id": "afis-tasarimcisi", "ad": "Afiş Tasarımcısı", "departman": "produksiyon", "model": "opus",
+      "aciklama": "Yeni dönem, atölye ve etkinlik afişleri; post ve story görselleri.",
+      "baglantilar": ["Adobe Express", "Higgsfield"],
+      "araclar": "Read,Write",
+      "anahtar": ["afiş", "görsel", "tasarım", "poster", "story görseli", "broşür", "davetiye"]
+    },
+
+    {
+      "id": "sosyal-medya", "ad": "Sosyal Medya Yöneticisi", "departman": "sosyal", "model": "opus",
+      "aciklama": "@atolye.afife içerik takvimi, caption ve hashtag. Her pazartesi haftalık paylaşım planı.",
+      "baglantilar": ["Instagram becerileri", "Supermetrics · Instagram"],
+      "araclar": "Read,Write,WebSearch",
+      "anahtar": ["instagram", "paylaşım", "caption", "içerik takvimi", "post", "tiktok", "hashtag", "bu hafta ne paylaş"],
+      "zamanlama": { "saat": "10:00", "gunler": ["pzt"], "gorev": "Bu haftanın Instagram paylaşım planını çıkar: 3 Reels, 2 carousel, günlük story fikri. Her biri için caption taslağı." }
+    },
+    {
+      "id": "reklam-kreatifcisi", "ad": "Reklam Kreatifçisi", "departman": "sosyal", "model": "opus",
+      "aciklama": "Tutan reklamlara bakar; Meta için reklam metni ve kreatif varyasyonları hazırlar.",
+      "baglantilar": ["Meta Reklam Kütüphanesi", "Higgsfield"],
+      "araclar": "Read,Write,WebSearch",
+      "anahtar": ["reklam metni", "kreatif", "reklam görseli", "reklam hazırla", "reklam çıkar"]
+    },
+    {
+      "id": "mesaj-asistani", "ad": "Mesaj Asistanı", "departman": "sosyal", "model": "sonnet",
+      "aciklama": "DM, yorum ve WhatsApp sorularına 'Siz' hitabıyla cevap taslağı yazar.",
+      "baglantilar": ["Instagram becerileri"],
+      "araclar": "Read,Write",
+      "anahtar": ["dm", "mesaj", "yorum", "cevap yaz", "whatsapp", "veli soruyor", "soru geldi"]
+    },
+
+    {
+      "id": "meta-analist", "ad": "Meta Reklam Analisti", "departman": "analiz", "model": "opus",
+      "aciklama": "Gece 00:00'da Meta reklamlarını ve Instagram istatistiklerini okur, sabaha özet bırakır.",
+      "baglantilar": ["Supermetrics · Meta Ads", "Supermetrics · Instagram"],
+      "araclar": "Read,Write",
+      "anahtar": ["reklam performansı", "harcama", "roas", "istatistik", "insights", "erişim", "reklamlar nasıl", "tıklama"],
+      "zamanlama": { "saat": "00:00", "gorev": "Son 7 günün Meta reklam ve Instagram sonuçlarını özetle: harcama, mesaj/kayıt başına maliyet, en iyi ve en zayıf reklam, yapılacak 3 şey." }
+    },
+    {
+      "id": "viral-tahminci", "ad": "Viral Tahminci", "departman": "analiz", "model": "sonnet",
+      "aciklama": "Yayından önce Reels'i puanlar: kanca, izlenme süresi, paylaşılma. 3 iyileştirme önerir.",
+      "baglantilar": ["Higgsfield · viral tahmin"],
+      "araclar": "Read,Write",
+      "anahtar": ["puanla", "tutar mı", "viral tahmin", "kanca", "yayından önce"]
+    },
+
+    {
+      "id": "kayit-sorumlusu", "ad": "Kayıt Sorumlusu", "departman": "finans", "model": "sonnet",
+      "aciklama": "Branş ve grup doluluğunu, bekleme listesini ve deneme atölyesi taleplerini takip eder.",
+      "baglantilar": ["Google Sheets · Kayıtlar"],
+      "araclar": "Read,Write",
+      "anahtar": ["kayıt", "doluluk", "kontenjan", "grup", "deneme atölyesi", "katılımcı", "bekleme listesi", "kaç kişi"],
+      "zamanlama": { "saat": "17:00", "gunler": ["cum"], "gorev": "Haftalık doluluk özetini çıkar: branş ve grup bazında dolu/boş yer, bekleme listesi, takip edilmesi gereken deneme talepleri." }
+    },
+    {
+      "id": "muhasebeci", "ad": "Muhasebeci", "departman": "finans", "model": "opus",
+      "aciklama": "Atölye gelir-giderini işler; ay sonunda rapor ve tasarruf önerisi çıkarır.",
+      "baglantilar": ["Google Sheets · Gelir-Gider"],
+      "araclar": "Read,Write",
+      "anahtar": ["gelir", "gider", "fatura", "muhasebe", "ödeme", "kasa", "ay sonu", "kira", "maliyet", "kâr"],
+      "zamanlama": { "saat": "20:00", "ayinSonGunu": true, "gorev": "Bu ayın gelir-gider raporunu çıkar: branş bazında gelir, gider dağılımı, geçen ayla karşılaştırma, 3 öneri." }
+    },
+
+    {
+      "id": "web-editoru", "ad": "Web Editörü", "departman": "web", "model": "sonnet",
+      "aciklama": "atolyeafife.com sayfa ve blog yazıları; SEO başlık ve açıklamaları.",
+      "baglantilar": ["Google Drive · Blog_Yazıları", "Wix (elle yapıştırma)"],
+      "araclar": "Read,Write,WebSearch,WebFetch",
+      "anahtar": ["site", "web", "blog", "seo", "sayfa", "wix", "site yazısı"]
+    },
+    {
+      "id": "etkinlik-planlayici", "ad": "Etkinlik Planlayıcı", "departman": "web", "model": "sonnet",
+      "aciklama": "Oyunlar, konserler, Tersten Masallar gösterimleri ve dönem sonu sunumları için takvim ve duyuru planı.",
+      "baglantilar": ["Google Drive · Oyunlar_Konserler", "Google Takvim"],
+      "araclar": "Read,Write",
+      "anahtar": ["etkinlik", "oyun", "konser", "gösteri", "tersten masallar", "prova", "sahne", "dönem sonu"]
+    }
+  ]
+}
