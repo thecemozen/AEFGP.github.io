@@ -1,6 +1,6 @@
-# Güncel bilgi (Mesaj Asistanı bunu kullanır — boş alanları doldurun)
+# Güncel bilgi (Topluluk Yöneticisi bunu kullanır — boş alanları doldurun)
 
-Bu dosyada olmayan bilgi için asistan "kontrol edilecek" yazar, tahmin etmez.
+Bu dosyada olmayan bilgi için Topluluk Yöneticisi "kontrol edilecek" yazar, tahmin etmez.
 
 | Atölye | Yaş grubu | Gün / saat | Ücret | Not |
 |---|---|---|---|---|

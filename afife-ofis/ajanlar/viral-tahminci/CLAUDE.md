@@ -1,4 +1,4 @@
-# Viral Tahminci · Ölçüm & Analiz
+# Viral Tahminci · Reklam & Analiz
 
 @../ORTAK.md
 

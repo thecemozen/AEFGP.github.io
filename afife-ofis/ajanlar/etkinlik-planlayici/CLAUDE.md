@@ -7,7 +7,7 @@ Oyunlar, konserler, Tersten Masallar gösterimleri ve dönem sonu sunumları iç
 
 ## Görevlerin
 - Oyun, konser ve dönem sonu sunumları için geri sayımlı takvim: prova, afiş, duyuru, bilet/rezervasyon, sahne günü.
-- Kim ne yapacak listesi (Afiş Tasarımcısı, Sosyal Medya, Reels Editörü).
+- Kim ne yapacak listesi (Afiş Tasarımcısı, Instagram Planlayıcı, Caption & Görsel Yazarı, Video Editörü).
 
 ## Bağlantıların
 - Google Drive · Oyunlar_Konserler

@@ -1,4 +1,4 @@
-# Meta Reklam Analisti · Ölçüm & Analiz
+# Meta Reklam Analisti · Reklam & Analiz
 
 @../ORTAK.md
 

@@ -1,6 +1,6 @@
 # Afife Ofisi
 
-Atölye Afife için 16 kişilik yapay zekâ ofisi. Her çalışan bir klasör, her klasörün kendi kuralları
+Atölye Afife için 18 kişilik yapay zekâ ofisi. Her çalışan bir klasör, her klasörün kendi kuralları
 (`CLAUDE.md`) var. Siz görevi yazarsınız, Genel Müdür işi doğru kişiye devreder, o kişi Claude Code
 ile işi yapar ve raporunu kendi `ciktilar/` klasörüne bırakır. Bazı çalışanlar belli saatlerde
 kendiliğinden çalışır.
@@ -17,35 +17,35 @@ Siz → Genel Müdür → doğru çalışan → ciktilar/2026-11-15-....md → "
 | Beyin Takımı | İçerik Avcısı | Günün 5 sanat atölyesi videosu + Afife uyarlaması | Her gün 08:00 |
 | | Rakip Analisti | Kadıköy atölyelerinin paylaşım ve reklamları | Pzt 09:00 |
 | | Strateji Koçu | Dönem hedefi, doluluğu düşük branş için plan | |
-| Prodüksiyon | Reels Editörü | Ham çekimden Afife tarzı Reels (tema.json) | |
+| Prodüksiyon | Video Editörü | Ham çekimden Reels; masaüstündeki video-kurgu klasöründe, reels-kurgu becerisiyle çalışır | |
 | | Seslendirmen | Seslendirme metni + ElevenLabs | |
 | | Afiş Tasarımcısı | Dönem/etkinlik afişi, post, story | |
-| Sosyal Medya & Reklam | Sosyal Medya Yöneticisi | Haftalık paylaşım planı ve caption | Pzt 10:00 |
+| Instagram Ekibi | Instagram Planlayıcı | Haftalık plan, profil, hesap denetimi (ig-plan, ig-profile, ig-audit) | Pzt 10:00 |
+| | Reels Senaristi | Kanca ve çekim senaryosu, tutan içerik uyarlaması (ig-reel, ig-viral, ig-repurpose) | |
+| | Caption & Görsel Yazarı | Caption, carousel, story (ig-caption, ig-carousel, ig-story, ig-human) | |
+| | Topluluk Yöneticisi | DM, yorum cevabı, iş birliği mesajı (ig-dm, ig-reply, ig-comment) | |
+| Reklam & Analiz | Meta Reklam Analisti | Reklam ve Instagram özeti (Supermetrics) | Her gün 00:00 |
 | | Reklam Kreatifçisi | Meta reklam metni ve kreatif varyasyonları | |
-| | Mesaj Asistanı | DM/yorum/WhatsApp cevap taslağı | |
-| Ölçüm & Analiz | Meta Reklam Analisti | Reklam ve Instagram özeti (Supermetrics) | Her gün 00:00 |
 | | Viral Tahminci | Reels'i yayından önce puanlar (Higgsfield) | |
 | Kayıt & Finans | Kayıt Sorumlusu | Grup doluluğu, bekleme listesi, deneme talepleri | Cuma 17:00 |
 | | Muhasebeci | Gelir-gider, ay sonu raporu | Ayın son günü 20:00 |
 | Web & Etkinlik | Web Editörü | atolyeafife.com metinleri ve SEO | |
 | | Etkinlik Planlayıcı | Oyun, konser, dönem sonu takvimi | |
 
-## Kurulum (bilgisayarınızda, bir kere)
+## Kurulum (bir kere, PC'de)
 
-1. **Node.js 18+** kurun: https://nodejs.org
-2. **Claude Code** kurun ve giriş yapın:
-   ```
-   npm install -g @anthropic-ai/claude-code
-   claude        # tarayıcıda claude.ai hesabınızla giriş yapın, sonra çıkın
-   ```
-3. Bu klasörü bilgisayarınıza alın ve çalıştırın:
-   ```
-   cd afife-ofis
-   node server.js
-   ```
-4. Tarayıcıda **http://127.0.0.1:4747** adresini açın. Sağ üstte "Canlı" yazıyorsa hazırsınız.
+video-kurgu ile aynı yöntem: kurulumu Claude yapar.
 
-Demo kutusu işaretliyken hiçbir şey gerçekten çalışmaz, sadece canlandırılır ve örnek rapor açılır.
+1. Claude masaüstü uygulamasında **Code** sekmesini açın ve şunu yazın:
+   > GitHub'daki thecemozen/AEFGP.github.io deposunun `ccr-e7449adc-kwdy46` dalındaki `afife-ofis`
+   > klasörünü masaüstüme `afife-ofis` adıyla indir. Sonra o klasörü aç ve ofisi kur.
+2. Claude `.claude/skills/ofis-kurulum` becerisini izler: Node.js ve Claude Code kontrolü, Kaspersky,
+   video-kurgu bağlantısı, fontlar, bağlayıcı izinleri, canlı test, masaüstü kısayolu. Sonunda
+   `KURULUM.md` yazar.
+3. Bundan sonra masaüstündeki **Afife Ofisi** kısayoluna çift tıklayın. Ofis tarayıcıda açılır.
+
+Elle kurmak isterseniz: Node.js 18+, Claude Code (`claude` komutu, giriş yapılmış), sonra bu klasörde
+`Ofisi Ac.cmd`.
 
 ## Bağlantılar (MCP)
 
@@ -65,7 +65,7 @@ raporun sonuna eksik bağlantıyı yazar.
 
 ## Doldurulması gerekenler
 
-- `ajanlar/mesaj-asistani/bilgi.md`: yaş grupları, gün/saat, ücretler. Boş kalan bilgi için asistan
+- `ajanlar/topluluk-yoneticisi/bilgi.md`: yaş grupları, gün/saat, ücretler. Boş kalan bilgi için Topluluk Yöneticisi
   "kontrol edilecek" yazar, tahmin etmez.
 - Google Sheets'te **Kayıtlar** ve **Gelir-Gider** tabloları (Kayıt Sorumlusu ve Muhasebeci okur).
 - `ajanlar/rakip-analisti/rakipler.md`: izlenecek 5 atölye. Yoksa ilk çalışmada ajan öneri listesi çıkarır.
@@ -106,10 +106,14 @@ işletim sisteminin zamanlayıcısını kullanın.
 
 ```
 afife-ofis/
+  CLAUDE.md       bu klasörde konuşan Claude için kurulum/bakım talimatı
+  Ofisi Ac.cmd    çift tıkla: sunucuyu başlatır, tarayıcıyı açar
+  .claude/skills/ ofis-kurulum, yeni-calisan
   index.html      ofis arayüzü (3B, Three.js)
   server.js       yerel sunucu: yönlendirme, iş kuyruğu, zamanlayıcı, bildirim
   ofis.json       çalışan listesi (arayüz ve sunucu ikisi de buradan okur)
-  tema.json       Afife görsel kimliği (Reels Editörü kullanır)
+  tema.json       Afife görsel kimliği (kopya; asıl kaynak video-kurgu/markalar/afife)
+  ajanlar/_instagram/  Instagram Ekibi ortak kuralları (IG.md) ve hafızası (profil, plan)
   ajanlar/
     ORTAK.md      herkesin uyduğu marka ve gizlilik kuralları
     <id>/CLAUDE.md   o çalışanın kuralları

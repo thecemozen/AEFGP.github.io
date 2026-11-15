@@ -1,4 +1,4 @@
-# Reklam Kreatifçisi · Sosyal Medya & Reklam
+# Reklam Kreatifçisi · Reklam & Analiz
 
 @../ORTAK.md
 

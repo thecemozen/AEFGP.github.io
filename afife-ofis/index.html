@@ -456,7 +456,7 @@ Ekim ayı artıda kapandı; gider Eylül'e göre %6 azaldı, en büyük düşü�
 2. **Kil toplu alımı.** 3 aylık alımda birim maliyet düşüyor.
 3. **Seramik fiyatı.** Bekleme listesi varken fiyat güncellemesi için uygun zaman.`,
 
-'sosyal-medya': `# Bu haftanın paylaşım planı
+'instagram-planlayici': `# Bu haftanın paylaşım planı
 3 Reels, 2 carousel ve her gün bir story. Ağırlık: Seramik ve yeni dönem kayıtları.
 
 ## Plan
@@ -795,7 +795,7 @@ function sahneKur() {
 
   // çalışanlar
   OFIS.ajanlar.forEach((a, idx) => {
-    let pos, renk;
+    let pos, renk, etiketZ = 0;
     if (a.departman === 'yonetim') {
       renk = GM_RENK; pos = new THREE.Vector3(17.2, 0, -7.55);
     } else {
@@ -803,7 +803,8 @@ function sahneKur() {
       const d = OFIS.departmanlar[di]; renk = d.renk;
       const ekip = OFIS.ajanlar.filter(x => x.departman === a.departman);
       const k = ekip.indexOf(a), n = ekip.length;
-      const ofset = (k - (n - 1) / 2) * 2.45;
+      const ofset = (k - (n - 1) / 2) * (n > 3 ? 6.6 / (n - 1) : 2.45);
+      etiketZ = n > 3 ? k * .55 : 0;
       pos = new THREE.Vector3(KOLON[di % 3] + ofset, 0, SATIR[Math.floor(di / 3)] - 1.2);
     }
     const ins = insan(renk, idx + 1);
@@ -817,7 +818,7 @@ function sahneKur() {
     el.className = 'et-ajan' + (a.departman === 'yonetim' ? ' gm' : '');
     el.innerHTML = `<i style="background:${a.departman === 'yonetim' ? '#E75F27' : renk}"></i>${esc(a.ad)}${a.zamanlama ? `<small>${esc(a.zamanlama.saat)}</small>` : ''}`;
     el.addEventListener('click', () => { turuDurdur(); kartAc(a.id, true); });
-    const et = etiketEkle(el, new THREE.Vector3(pos.x - .2, .82, pos.z + 1.95));
+    const et = etiketEkle(el, new THREE.Vector3(pos.x - .2, .82, pos.z + 1.95 + etiketZ));
     AJAN[a.id] = { ...a, renk, pos, ins, et, balon: null, calisiyor: false };
   });
 

@@ -30,13 +30,39 @@ function yayinla(olay) {
 }
 
 // ---------- Claude Code çağrısı ----------
+// Görev metni stdin'den gider: Windows'ta (cmd.exe) Türkçe karakter ve tırnaklar argümanda bozulmasın.
+const WIN = process.platform === 'win32';
+const tirnak = a => (WIN && /[\s&|<>^"]/.test(a) ? `"${a.replace(/"/g, '""')}"` : a);
+// Bir ajan kendi klasörü yerine başka bir sistemin klasöründe çalışabilir (ör. Video Editörü →
+// ../video-kurgu). O zaman oranın CLAUDE.md ve becerileri yüklenir; ajanın kendi kuralları
+// (ve @ ile içe aktardıkları) görev metninin başına eklenir.
+const ajanKlasoru = ajan => path.join(KOK, 'ajanlar', ajan.id);
+function kuralMetni(ajan) {
+  const dosya = path.join(ajanKlasoru(ajan), 'CLAUDE.md');
+  if (!fs.existsSync(dosya)) return '';
+  return fs.readFileSync(dosya, 'utf8').replace(/^@(\S+)\s*$/gm, (_, y) => {
+    try { return fs.readFileSync(path.resolve(ajanKlasoru(ajan), y), 'utf8'); } catch { return ''; }
+  });
+}
+
 function claudeCalistir(ajan, istem) {
   return new Promise((resolve, reject) => {
-    const args = ['-p', istem, '--output-format', 'json', '--model', ajan.model || 'sonnet',
+    let cwd = ajanKlasoru(ajan);
+    if (ajan.calismaKlasoru) {
+      cwd = path.resolve(KOK, ajan.calismaKlasoru);
+      if (!fs.existsSync(cwd)) return reject(new Error(`${ajan.ad} için çalışma klasörü bulunamadı: ${cwd}`));
+      istem = `# Ofis kuralların (Afife Ofisi · ${ajan.ad})\n\n${kuralMetni(ajan)}\n\n---\n\n# Görev\n\n${istem}`;
+    }
+    const args = ['-p', '--output-format', 'json', '--model', ajan.model || 'sonnet',
       '--permission-mode', 'acceptEdits'];
     if (ajan.araclar) args.push('--allowedTools', ajan.araclar);
-    const cp = spawn(CLAUDE, args, { cwd: path.join(KOK, 'ajanlar', ajan.id), env: process.env });
+    for (const k of ajan.ekKlasorler || []) args.push('--add-dir', path.resolve(KOK, k));
+    if (ajan.calismaKlasoru) args.push('--add-dir', ajanKlasoru(ajan));
+    const cp = spawn(CLAUDE, WIN ? args.map(tirnak) : args, {
+      cwd, env: process.env, shell: WIN, windowsHide: true,
+    });
     let out = '', err = '';
+    cp.stdout.setEncoding('utf8'); cp.stderr.setEncoding('utf8');
     cp.stdout.on('data', d => (out += d));
     cp.stderr.on('data', d => (err += d));
     cp.on('error', e => reject(new Error(`claude başlatılamadı (${e.message}). Claude Code kurulu mu?`)));
@@ -50,6 +76,7 @@ function claudeCalistir(ajan, istem) {
         reject(new Error((err || out || `çıkış kodu ${kod}`).slice(0, 400)));
       }
     });
+    cp.stdin.end(istem, 'utf8');
   });
 }
 
@@ -117,7 +144,8 @@ async function isYap({ id, metin, kime, kaynak }) {
   yayinla({ tip: 'aldi', id, ajan: ajan.id, mesaj: 'Görevi aldım: ' + kisalt(hedef.gorev, 90) });
   const bas = Date.now() - 1000;
   const bugun = new Date().toISOString().slice(0, 10);
-  const istem = `${hedef.gorev}\n\n(Bugün: ${bugun}. Çıktını ciktilar/ klasörüne ${bugun}-kisa-ad.md olarak yaz.)`;
+  const ciktiKlasoru = ajan.calismaKlasoru ? path.join(ajanKlasoru(ajan), 'ciktilar') : 'ciktilar/';
+  const istem = `${hedef.gorev}\n\n(Bugün: ${bugun}. Raporunu ${ciktiKlasoru} klasörüne ${bugun}-kisa-ad.md olarak yaz.)`;
   yayinla({ tip: 'calisiyor', id, ajan: ajan.id });
   const { metin: sonuc, maliyet } = await claudeCalistir(ajan, istem);
   const dosya = sonCikti(ajan.id, bas);
@@ -126,7 +154,7 @@ async function isYap({ id, metin, kime, kaynak }) {
   bildir(`${ajan.ad}: hazır ✓`, kisalt(sonuc, 300));
   if (hedef.sonraki && ajanBul(hedef.sonraki) && dosya) {
     isEkle({ id: id + '-2', kime: hedef.sonraki, kaynak: 'devir',
-      metin: `${ajan.ad} şu çıktıyı hazırladı: ../${ajan.id}/ciktilar/${dosya}\nOnu oku ve şu işin senin payına düşen kısmını yap: ${metin}` });
+      metin: `${ajan.ad} şu raporu hazırladı:\n\n${fs.readFileSync(path.join(ajanKlasoru(ajan), 'ciktilar', dosya), 'utf8').slice(0, 20000)}\n\n---\nŞimdi şu işin senin payına düşen kısmını yap: ${metin}` });
   }
 }
 const kisalt = (s, n) => (s || '').replace(/\s+/g, ' ').trim().slice(0, n);
@@ -160,7 +188,7 @@ function dosyaGonder(res, p) {
   });
 }
 
-http.createServer((req, res) => {
+const sunucu = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
   const p = decodeURIComponent(url.pathname);
 
@@ -209,6 +237,22 @@ http.createServer((req, res) => {
     return res.end(JSON.stringify(liste.map(f => ({ ad: f, yol: `/cikti/${id}/${encodeURIComponent(f)}` }))));
   }
   res.writeHead(404); res.end('yok');
-}).listen(PORT, '127.0.0.1', () => {
-  console.log(`\n  Afife Ofisi açık → http://127.0.0.1:${PORT}\n  ${ofis.ajanlar.length} çalışan · Claude: ${CLAUDE}${NTFY ? ' · bildirim: ntfy/' + NTFY : ''}\n`);
+});
+sunucu.on('error', e => {
+  if (e.code === 'EADDRINUSE') {
+    console.log(`\n  Ofis zaten açık görünüyor → http://127.0.0.1:${PORT}\n  (Bu pencereyi kapatabilirsiniz.)\n`);
+    if (process.argv.includes('--ac')) tarayiciAc();
+    setTimeout(() => process.exit(0), 1500);
+    return;
+  }
+  throw e;
+});
+function tarayiciAc() {
+  const url = `http://127.0.0.1:${PORT}`;
+  const [k, a] = WIN ? ['cmd', ['/c', 'start', '', url]] : process.platform === 'darwin' ? ['open', [url]] : ['xdg-open', [url]];
+  spawn(k, a, { stdio: 'ignore', detached: true, windowsHide: true }).on('error', () => {}).unref();
+}
+sunucu.listen(PORT, '127.0.0.1', () => {
+  console.log(`\n  Afife Ofisi açık → http://127.0.0.1:${PORT}\n  ${ofis.ajanlar.length} çalışan · Claude: ${CLAUDE}${NTFY ? ' · bildirim: ntfy/' + NTFY : ''}\n  Kapatmak için bu pencereyi kapatın.\n`);
+  if (process.argv.includes('--ac')) tarayiciAc();
 });
