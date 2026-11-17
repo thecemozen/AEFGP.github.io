@@ -84,6 +84,10 @@ export const PRINTER_SCHEMA = [
     { k: 'layerChangeGcode', l: 'Katman değişimi G-code', t: 'g', tip: 'Her katmanın başında. Değişkenler: {layer} {z}', adv: true },
   ]},
   { g: 'Klipper / Fluidd', items: [
+    { k: 'timelapse', l: 'Timelapse (kamera)', t: 's', o: { none: 'Kapalı', frame: 'Her katmanda kare (kafa yerinde)', park: 'Kafayı kenara çekip kare al (akıcı video)' }, tip: "Her katman sonunda TIMELAPSE_TAKE_FRAME komutu eklenir. Yazıcıda moonraker-timelapse (ya da aynı adlı bir makro) kurulu olmalı; Fluidd'de Timelapse ayarlarından video oluşturulur. 'Kenara çek' modu baskıyı biraz uzatır (katman başına ~1 sn) ama karelerde nozul modelin üstünde görünmez." },
+    { k: 'timelapseParkX', l: 'Timelapse park X', u: 'mm', t: 'n', min: 0, max: 500, s: 1, adv: true },
+    { k: 'timelapseParkY', l: 'Timelapse park Y', u: 'mm', t: 'n', min: 0, max: 500, s: 1, adv: true },
+    { k: 'timelapseDwell', l: 'Kare öncesi bekleme', u: 'ms', t: 'n', min: 0, max: 3000, s: 50, adv: true, tip: 'Kafa durduktan sonra kameranın netleşmesi için bekleme.' },
     { k: 'labelObjects', l: 'Nesne etiketle (EXCLUDE_OBJECT)', t: 'b', tip: "Fluidd'de baskı sırasında tek bir parçayı iptal etmeyi sağlar. printer.cfg içinde [exclude_object] bölümü yoksa yazıcı hata verir; emin değilseniz kapalı bırakın." },
     { k: 'startLineMode', l: 'Başlangıç çizgisi (önizleme)', t: 's', o: { auto: 'Yazıcıdan oku', manual: 'Elle gir', none: 'Gösterme' }, tip: 'Baskı başındaki temizleme çizgisini yazıcının START_PRINT komutu çizer. "Yazıcıdan oku": bağlanınca makro okunur (KAMP uyarlanabilir çizgi ya da makrodaki G1 hareketleri). Creality\'nin kendi çizgisi okunamaz; o zaman "Elle gir" seçin.' },
     { k: 'startLineManual', l: 'Çizgi (X1,Y1,X2,Y2)', t: 'x', tip: 'Elle girişte: çizginin başlangıç ve bitiş noktası (mm), ör. 5,5,5,150. Yalnızca önizlemede gösterilir; G-code değişmez.' },
@@ -108,7 +112,7 @@ export const PRINTER_BASE = {
   retractLength: 0.8, retractSpeed: 40, deretractSpeed: 40, zHop: 0.2, retractMinTravel: 1.5, retractOnLayerChange: true, zHopType: 'slope', travelSlope: 3, avoidCrossingWalls: true, retractOnlyCrossing: true, combMaxDetour: 2, wipe: true, wipeDistance: 1.5, wipeRetractPart: 70,
   toolChangeLift: 0.4, toolChangeTime: 45, changeFilamentGcode: CHANGE_GCODE,
   startGcode: START_GCODE, endGcode: END_GCODE, layerChangeGcode: '',
-  labelObjects: true, startLineMode: 'auto', startLineManual: '', startLineInfo: '', thumbnail: true, thumbnailSize: 300,
+  labelObjects: true, timelapse: 'none', timelapseParkX: 290, timelapseParkY: 290, timelapseDwell: 300, startLineMode: 'auto', startLineManual: '', startLineInfo: '', thumbnail: true, thumbnailSize: 300,
   hostIp: '', hostPort: 7125, apiKey: '', uploadFolder: '', timeScale: 1, startupTime: 0,
 };
 

@@ -1127,12 +1127,26 @@
     return r;
   }
 
+  // Yükseklik aralığı ayarları (Orca: height range modifier): nesnenin belli bir Z aralığında duvar sayısı, dolgu
+  // yoğunluğu/deseni ve dolgu hızı farklı olabilir. ranges = [{ z0, z1, S: { ... } }]
+  var RANGE_KEYS = ['wallLoops', 'infillDensity', 'infillPattern', 'sparseInfillSpeed'];
+  function layerS(S, ranges, z) {
+    if (!ranges || !ranges.length) return S;
+    for (var i = 0; i < ranges.length; i++) {
+      var r = ranges[i];
+      if (z > r.z0 + 1e-6 && z <= r.z1 + 1e-6) {
+        if (!r._S) { r._S = Object.assign({}, S); RANGE_KEYS.forEach(function (k) { if (r.S && r.S[k] !== undefined && r.S[k] !== '' && r.S[k] !== null) r._S[k] = r.S[k]; }); }
+        return r._S;
+      }
+    }
+    return S;
+  }
   function processPart(part, layers, S, below) {
     var nL = layers.length;
     var R = part.regions = [];
-    for (var li = 0; li < nL; li++) R.push(regionA(part.outline[li], li, layers, S));
+    for (var li = 0; li < nL; li++) R.push(regionA(part.outline[li], li, layers, layerS(S, part.ranges, layers[li].z)));
     var sh = shellInfo(layers, S);
-    for (li = 0; li < nL; li++) regionB(li, R, layers, S, below, sh);
+    for (li = 0; li < nL; li++) regionB(li, R, layers, layerS(S, part.ranges, layers[li].z), below, sh);
   }
 
   // Tüm parçaların katman planlarını yardımcılara dağıtır (G-code yazımından önce)
@@ -1145,7 +1159,7 @@
         items.push({ li: li, Unext: q.U[li + 1] || [], Uprev: li > 0 ? q.U[li - 1] : null, comb: !!(S.avoidCrossingWalls && !(S.spiralVase && li >= S.spiralStart)), parts: parts.map(function (p) {
           var r = p.regions[li];
           if (!r || !r.outline.length) return null;
-          return { r: { outline: r.outline, walls: r.walls, fill: r.fill, solid: r.solid, top: r.top, sparse: r.sparse, bridge: r.bridge, lightning: r.lightning, adapt: r.adapt }, combo: comboFor(p, li, nL, S) };
+          return { r: { outline: r.outline, walls: r.walls, fill: r.fill, solid: r.solid, top: r.top, sparse: r.sparse, bridge: r.bridge, lightning: r.lightning, adapt: r.adapt }, combo: comboFor(p, li, nL, S), ranges: p.ranges };
         }) });
       }
       tasks.push({ kind: 'C', S: S, layers: layers, items: items });
@@ -1168,15 +1182,15 @@
       var nL = t.layers.length;
       return t.items.map(function (it) {
         var Ly = t.layers[it.li], spiral = t.S.spiralVase && it.li >= t.S.spiralStart;
-        var res = { li: it.li, plans: it.parts.map(function (pp) { return pp ? planPart(pp.r, it.li, nL, t.S, Ly.h, Ly.z, spiral, pp.combo, it.Unext, it.Uprev) : null; }) };
+        var res = { li: it.li, plans: it.parts.map(function (pp) { return pp ? planPart(pp.r, it.li, nL, layerS(t.S, pp.ranges, Ly.z), Ly.h, Ly.z, spiral, pp.combo, it.Unext, it.Uprev) : null; }) };
         if (it.comb) res.comb = combRegions(it.parts.filter(Boolean).map(function (pp) { return pp.r.outline; }), it.li, t.S.W);
         return res;
       });
     }
-    if (t.kind === 'A') return t.items.map(function (it) { return { li: it.li, r: regionA(it.outline, it.li, t.layers, t.S) }; });
+    if (t.kind === 'A') return t.items.map(function (it) { return { li: it.li, r: regionA(it.outline, it.li, t.layers, layerS(t.S, t.ranges, t.layers[it.li].z)) }; });
     var sh = shellInfo(t.layers, t.S);
     return t.items.map(function (li) {
-      var r = regionB(li, t.R, t.layers, t.S, t.below, sh);
+      var r = regionB(li, t.R, t.layers, layerS(t.S, t.ranges, t.layers[li].z), t.below, sh);
       return { li: li, solid: r.solid, sparse: r.sparse, top: r.top, bridge: r.bridge };
     });
   }
@@ -1189,7 +1203,7 @@
     for (var a = 0; a < nL; a += size) {
       var items = [];
       for (var li = a; li < Math.min(nL, a + size); li++) items.push({ li: li, outline: part.outline[li] });
-      tasks.push({ kind: 'A', S: S, layers: layers, items: items });
+      tasks.push({ kind: 'A', S: S, layers: layers, items: items, ranges: part.ranges });
     }
     progress(0.3, 'Duvarlar ve dolgu (' + label + ') · ' + pool.size + ' çekirdek');
     return pool.run(tasks).then(function (res) {
@@ -1207,7 +1221,7 @@
         var win = {}, bel = {};
         for (var j = lo; j < hi; j++) win[j] = R[j];
         for (j = Math.max(0, a2 - 1); j < b2; j++) bel[j] = below[j];
-        tasksB.push({ kind: 'B', S: S, layers: layers, items: its, R: win, below: bel });
+        tasksB.push({ kind: 'B', S: S, layers: layers, items: its, R: win, below: bel, ranges: part.ranges });
       }
       progress(0.45, 'Üst/alt yüzeyler (' + label + ') · ' + pool.size + ' çekirdek');
       return pool.run(tasksB);
@@ -1648,7 +1662,7 @@
     var pos = { x: 0, y: 0, z: 0 };
     var extruder = -1;
     var retracted = false;
-    var curF = 0, curAccel = 0, fanState = {};
+    var curF = 0, curAccel = 0, fanState = {}, partS = null;
     var stats = { time: 0, e: [0, 0, 0, 0], toolChanges: 0, byType: {}, retracts: 0, combed: 0 };
     var lastPath = null, comb = null;
     var nL = layers.length;
@@ -2124,7 +2138,7 @@
     // katman planı: paralel dilimlemede önceden hazırdır; yoksa burada bir kez hesaplanır (en kısa katman süresi tekrarında yeniden kullanılır)
     function planOf(p) {
       p.plans = p.plans || [];
-      return p.plans[li] || (p.plans[li] = planPart(p.regions[li], li, nL, S, h, Ly.z, spiral, comboFor(p, li, nL, S), job.U[li + 1] || [], li > 0 ? job.U[li - 1] : null));
+      return p.plans[li] || (p.plans[li] = planPart(p.regions[li], li, nL, layerS(S, p.ranges, Ly.z), h, Ly.z, spiral, comboFor(p, li, nL, S), job.U[li + 1] || [], li > 0 ? job.U[li - 1] : null));
     }
     // bu katmanda bir yuvanın parçalarının seyrek dolgu hacmi (yıkamanın dolguya yapılabilecek kısmı)
     function sparseVolume(slot) {
@@ -2183,6 +2197,19 @@
       var first = li === 0;
       var h = Ly.h;
       var spiral = S.spiralVase && li >= S.spiralStart;
+      // Timelapse (K1 kamerası / moonraker-timelapse): biten katmanın karesi. 'park' modunda kafa önce kenara çekilir,
+      // kısa bekler, sonra kare alınır — karelerde nozul modelin üstünde görünmez, video akıcı olur
+      if (S.timelapse && S.timelapse !== 'none' && li > 0) {
+        if (S.timelapse === 'park' && !spiral) {
+          var cm0 = comb; comb = null;
+          retract();
+          travel(Math.max(0, Math.min(S.bedX, num(S.timelapseParkX, S.bedX - 10))), Math.max(0, Math.min(S.bedY, num(S.timelapseParkY, S.bedY - 10))));
+          comb = cm0;
+          var dw = Math.max(0, num(S.timelapseDwell, 300));
+          if (dw) { out.push('G4 P' + Math.round(dw)); stats.time += dw / 1000; }
+        }
+        out.push('TIMELAPSE_TAKE_FRAME');
+      }
       layerIndex.push(preview.length / PV);
       comb = null;
       if (S.avoidCrossingWalls && !spiral) {
@@ -2282,6 +2309,7 @@
       function emitPart(p) {
         var r = p.regions[li];
         partFlow = p.flowMul || 1; // akış kalibrasyonu: parça başına akış çarpanı
+        partS = layerS(S, p.ranges, Ly.z);
         // katman planı: paralel dilimlemede önceden hazırdır; yoksa burada bir kez hesaplanır (en kısa katman süresi tekrarında yeniden kullanılır)
         var plan = planOf(p);
         if (S.labelObjects) out.push('EXCLUDE_OBJECT_START NAME=' + p.label);
@@ -2481,13 +2509,14 @@
         extrudePath(zpts, calibSpeed || S.outerWallSpeed, w, h, T.OUTER, S.accelOuterWall, 1, true);
       }
       function emitSparse(region, hMul, pre, preReg) {
-        var hh = h * (hMul || 1);
+        var hh = h * (hMul || 1), PS = partS || S;
         var wsp = first ? W.first : W.sparse;
-        var d = S.infillDensity / 100;
-        var sp = spd(first ? S.firstLayerInfillSpeed : S.sparseInfillSpeed);
+        var d = PS.infillDensity / 100;
+        if (d <= 0) return;
+        var sp = spd(first ? S.firstLayerInfillSpeed : PS.sparseInfillSpeed);
         var ac = first ? S.accelFirst : S.accelInfill;
-        var pat = S.infillPattern;
-        var ls = pre !== undefined ? pre : sparseLines(region, hMul || 1, li, Ly.z, S, W, first);
+        var pat = PS.infillPattern;
+        var ls = pre !== undefined ? pre : sparseLines(region, hMul || 1, li, Ly.z, PS, W, first);
         if (pat === 'helix' || pat === 'golden' || pat === 'speed' || pat === 'lightning') {
           var polys = S.infillJoin && pat !== 'lightning' ? joinInRegion(ls || [], region, (wsp / d) * 2.5, preReg) : orderLines(ls || [], [pos.x, pos.y]);
           polys.forEach(function (p) { extrudePath(p, sp, wsp, hh, T.SPARSE, ac, 1); });
@@ -2553,7 +2582,7 @@
     // Başlık bloğu: Moonraker/Fluidd dilimleyiciyi "; generated by AD SÜRÜM on TARİH at SAAT" satırından tanır
     var now = new Date(), p2 = function (n) { return (n < 10 ? '0' : '') + n; };
     header.push('; HEADER_BLOCK_START');
-    header.push('; generated by K1MaxDilimleyici 2.26 on ' + now.getFullYear() + '-' + p2(now.getMonth() + 1) + '-' + p2(now.getDate()) +
+    header.push('; generated by K1MaxDilimleyici 2.27 on ' + now.getFullYear() + '-' + p2(now.getMonth() + 1) + '-' + p2(now.getDate()) +
       ' at ' + p2(now.getHours()) + ':' + p2(now.getMinutes()) + ':' + p2(now.getSeconds()));
     header.push('; total layer number: ' + nL);
     header.push('; HEADER_BLOCK_END', '');
@@ -2628,11 +2657,13 @@
     };
     var fils = job.fils;
     var parts = job.parts.filter(function (p) { return p.positions && p.positions.length >= 9; }).map(function (p, i) {
-      return { name: p.name || ('part' + i), label: 'part_' + i, slot: Math.max(0, Math.min(fils.length - 1, p.slot | 0)), mesh: indexMesh(p.positions), flowMul: +p.flowMul || 1 };
+      return { name: p.name || ('part' + i), label: 'part_' + i, slot: Math.max(0, Math.min(fils.length - 1, p.slot | 0)), mesh: indexMesh(p.positions), flowMul: +p.flowMul || 1,
+        negative: p.role === 'negative', ranges: Array.isArray(p.ranges) && p.ranges.length ? p.ranges.map(function (r) { return { z0: +r.z0 || 0, z1: +r.z1 || 0, S: r.S || {} }; }) : null };
     });
+    if (!parts.some(function (p) { return !p.negative; })) throw new Error('Dilimlenecek model yok (yalnızca negatif parça var).');
     if (!parts.length) throw new Error('Dilimlenecek model yok.');
     if (S.spiralVase && parts.length > 1) throw new Error('Vazo modu yalnızca tek parçalı modellerde çalışır.');
-    var maxZ = Math.max.apply(null, parts.map(function (p) { return p.mesh.maxZ; }));
+    var maxZ = Math.max.apply(null, parts.filter(function (p) { return !p.negative; }).map(function (p) { return p.mesh.maxZ; }));
     RES = Math.max(0, num(S.resolution, 0.0125));
     FILL_RULE = S.sliceMode === 'evenodd' ? CL.PolyFillType.pftEvenOdd : CL.PolyFillType.pftNonZero;
     SMOOTH = !!S.smoothCurves; FACETS = 0; POLYHOLE = !!S.polyholes;
@@ -2641,6 +2672,17 @@
     S.spiralStart = Math.max(S.bottomLayers, 1);
 
     sliceParts(parts, layers, progress);
+
+    // Negatif parçalar (Orca: negative part): kesitleri diğer parçalardan çıkarılır (delik, oyuk, pim yuvası, yazı oyma)
+    var negs = parts.filter(function (p) { return p.negative; });
+    if (negs.length) {
+      parts = parts.filter(function (p) { return !p.negative; });
+      for (var ln = 0; ln < layers.length; ln++) {
+        var cutN = []; negs.forEach(function (q) { cutN = cutN.concat(q.outline[ln] || []); });
+        if (cutN.length) parts.forEach(function (p) { if (p.outline[ln].length) p.outline[ln] = difference(p.outline[ln], cutN); });
+      }
+      parts.forEach(function (p, i) { p.label = 'part_' + i; });
+    }
 
     // Yazdırılamayan çıkıntıyı koniye çevir (Orca: make overhang printable): üst katmanın, eşik açısına göre
     // küçültülmüş hâli alt katmana eklenir; çıkıntının altı destek gerekmeden basılabilen bir koni olur

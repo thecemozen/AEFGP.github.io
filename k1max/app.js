@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
-import { CATEGORIES, SLOT_COLORS, SLOT_COUNT, OLD_START_GCODE, START_GCODE, START_GCODE_V2, START_GCODE_NO_CFS, OLD_CHANGE_GCODE, CHANGE_GCODE } from './presets.js';
+import { CATEGORIES, PROCESS_SCHEMA, SLOT_COLORS, SLOT_COUNT, OLD_START_GCODE, START_GCODE, START_GCODE_V2, START_GCODE_NO_CFS, OLD_CHANGE_GCODE, CHANGE_GCODE } from './presets.js';
 import { load3MF } from './threemf.js';
 import { writeProject, readProject } from './project3mf.js';
 import { repairMesh, repairSummary } from './meshrepair.js';
@@ -39,7 +39,7 @@ function toBlob(text, id) {
 }
 
 // ================================================================= durum ve profiller
-const APP_VERSION = '2.26';
+const APP_VERSION = '2.27';
 const DEVICE_KEYS = ['hostIp', 'hostPort', 'apiKey', 'startLineInfo'];
 const FAST_PRESET = 'Hızlı baskı (uyarlanabilir 0.10–0.28)';
 let state = null;
@@ -616,7 +616,7 @@ scene.add(partsGroup);
 function partMaterial(slot) {
   return new THREE.MeshStandardMaterial({ color: state.slots[slot] ? state.slots[slot].color : '#2fa36b', roughness: 0.55, metalness: 0.05 });
 }
-function recolorParts() { parts.forEach(p => { if (p.mesh) p.mesh.material.color.set(state.slots[p.slot].color); }); }
+function recolorParts() { parts.forEach(p => { if (p.mesh && p.role !== 'negative') p.mesh.material.color.set(state.slots[p.slot].color); }); }
 const objParts = (o) => parts.filter(p => p.obj === o);
 
 function bboxOfArrays(list) {
@@ -703,7 +703,7 @@ function newObject(name, list) {
   objects.push(o);
   return o;
 }
-function addParts(list, replace, keepCalib, asObject) {
+function addParts(list, replace, keepCalib, asObject, opts = {}) {
   if (!keepCalib) setCalib(null);
   if (replace) { parts.forEach(p => { partsGroup.remove(p.mesh); p.mesh.geometry.dispose(); }); parts = []; objects = []; selObj = null; $('scale').value = 100; }
   let o;
@@ -717,9 +717,9 @@ function addParts(list, replace, keepCalib, asObject) {
     g.setAttribute('position', new THREE.BufferAttribute(a, 3));
     const mesh = new THREE.Mesh(new THREE.BufferGeometry(), partMaterial(p.slot || 0));
     partsGroup.add(mesh);
-    parts.push({ name: p.name, geom: g, slot: p.slot || 0, mesh, flowMul: p.flowMul || 1, obj: o });
+    parts.push({ name: p.name, geom: g, slot: p.slot || 0, mesh, flowMul: p.flowMul || 1, obj: o, role: p.role || undefined });
   });
-  normalizeObject(o);
+  if (!opts.noNormalize) normalizeObject(o);
   if (fresh && !replace) placeFree(o);
   placeAll(); focusModels();
   clearPreview();
@@ -736,6 +736,11 @@ function placeAll() {
     if (g.userData.nv !== pa.version) { g.computeVertexNormals(); g.computeBoundingBox(); g.computeBoundingSphere(); g.userData.nv = pa.version; }
     if (p.mesh.geometry !== g) { const old = p.mesh.geometry; p.mesh.geometry = g; if (!parts.some(q => q.geom === old)) old.dispose(); }
     const o = p.obj;
+    const neg = p.role === 'negative';
+    if (!!p.mesh.userData.neg !== neg) {
+      p.mesh.material = neg ? new THREE.MeshStandardMaterial({ color: '#e0453a', transparent: true, opacity: 0.45, depthWrite: false, roughness: 0.6 }) : partMaterial(p.slot);
+      p.mesh.userData.neg = neg; p.mesh.renderOrder = neg ? 2 : 0;
+    }
     p.mesh.position.set(o.x, o.y, 0); p.mesh.rotation.set(0, 0, o.rotZ); p.mesh.scale.set(o.sx, o.sy, o.sz);
     tris += pa.count / 3;
   });
@@ -792,7 +797,12 @@ function renderParts() {
       if (!objParts(p.obj).length) { objects = objects.filter(o => o !== p.obj); if (selObj === p.obj) selObj = null; }
       placeAll(); clearPreview(); renderParts(); renderObj();
     };
-    row.append(sw, nm, sel, x);
+    const rs = document.createElement('select'); rs.className = 'role'; rs.title = 'Parça türü';
+    [['', 'Model'], ['negative', 'Negatif']].forEach(([v, l]) => { const o = document.createElement('option'); o.value = v; o.textContent = l; rs.appendChild(o); });
+    rs.value = p.role || '';
+    rs.onchange = () => { p.role = rs.value || undefined; sw.style.background = p.role ? '#e0453a' : state.slots[p.slot].color; placeAll(); clearPreview(); invalidate(); };
+    if (p.role) sw.style.background = '#e0453a';
+    row.append(sw, nm, rs, sel, x);
     list.appendChild(row);
   });
 }
@@ -815,6 +825,7 @@ function renderObj() {
   $('objSX').value = Math.round(o.sx * 100); $('objSY').value = Math.round(o.sy * 100); $('objSZ').value = Math.round(o.sz * 100);
   const f = objFootprint(o), h = (() => { const b = new THREE.Box3(); objParts(o).forEach(p => { p.geom.computeBoundingBox(); b.union(p.geom.boundingBox); }); return (b.max.z - b.min.z) * o.sz; })();
   $('objSize').textContent = `${(f.max.x - f.min.x).toFixed(1)} × ${(f.max.y - f.min.y).toFixed(1)} × ${h.toFixed(1)} mm`;
+  renderRanges();
 }
 const targets = () => (selObj ? [selObj] : objects.slice());
 function changed3d() { placeAll(); clearPreview(); renderObj(); }
@@ -976,12 +987,12 @@ $('objDel').addEventListener('click', () => {
   placeAll(); clearPreview(); renderParts(); renderObj();
 });
 function cloneObject(o) {
-  const c = Object.assign({}, o, { id: ++objSeq, origin: Object.assign({}, o.origin) });
+  const c = Object.assign({}, o, { id: ++objSeq, origin: Object.assign({}, o.origin), ranges: o.ranges ? JSON.parse(JSON.stringify(o.ranges)) : undefined });
   objects.push(c);
   objParts(o).forEach(p => {
     const mesh = new THREE.Mesh(new THREE.BufferGeometry(), partMaterial(p.slot));
     partsGroup.add(mesh);
-    parts.push({ name: p.name, geom: p.geom.clone(), slot: p.slot, mesh, flowMul: p.flowMul, obj: c });
+    parts.push({ name: p.name, geom: p.geom.clone(), slot: p.slot, mesh, flowMul: p.flowMul, obj: c, role: p.role });
   });
   return c;
 }
@@ -999,20 +1010,40 @@ $('objCut').addEventListener('click', async () => {
   if (!selObj) return;
   const b = new THREE.Box3(); objParts(selObj).forEach(p => { p.geom.computeBoundingBox(); b.union(p.geom.boundingBox); });
   const H = (b.max.z - b.min.z) * selObj.sz;
-  const zc = await dialog('Nesneyi kes', `<label class="hint">Tabladan kesme yüksekliği (0–${H.toFixed(1)} mm). Kesik yüzler kapatılır, üst parça kesik yüzü tablaya gelecek şekilde yanına konur.</label><input type="number" id="cutZ" step="0.5" value="${(H / 2).toFixed(1)}">`,
-    [[null, 'Vazgeç'], [() => { const v = +$('cutZ').value; return v > 0.2 && v < H - 0.2 ? v : null; }, 'Kes', 'primary']]);
-  if (!zc) return;
-  cutObject(selObj, zc);
+  const res = await dialog('Nesneyi kes', `<label class="hint">Tabladan kesme yüksekliği (0–${H.toFixed(1)} mm). Kesik yüzler kapatılır, üst parça kesik yüzü tablaya gelecek şekilde yanına konur.</label><input type="number" id="cutZ" step="0.5" value="${(H / 2).toFixed(1)}">
+    <div class="dlgGrid" style="margin-top:10px">
+      <label class="full">Bağlantı pimi (Orca: cut connectors)<select id="cutPin"><option value="0">Yok</option><option value="1">1 pim</option><option value="2" selected>2 pim</option><option value="3">3 pim</option></select></label>
+      <label>Pim çapı (mm)<input type="number" id="cutPinD" step="0.5" min="2" max="20" value="5"></label>
+      <label>Her parçaya derinlik (mm)<input type="number" id="cutPinH" step="0.5" min="2" max="40" value="6"></label>
+      <label class="full">Delik boşluğu (mm, çap başına)<input type="number" id="cutPinTol" step="0.05" min="0" max="1" value="0.3"></label>
+    </div>
+    <p class="hint">Pim seçilirse iki parçanın kesik yüzüne pim delikleri açılır ve pimler ayrı nesne olarak tablaya eklenir. Pimleri dik basın; yapıştırıcıyla ya da sıkı geçme olarak takın.</p>`,
+    [[null, 'Vazgeç'], [() => { const v = +$('cutZ').value; if (!(v > 0.2 && v < H - 0.2)) return null;
+      return { zc: v, pin: +$('cutPin').value ? { n: +$('cutPin').value, d: Math.max(2, +$('cutPinD').value || 5), h: Math.max(2, +$('cutPinH').value || 6), tol: Math.max(0, +$('cutPinTol').value || 0) } : null }; }, 'Kes', 'primary']]);
+  if (!res) return;
+  cutObject(selObj, res.zc, res.pin);
 });
 // Nesneyi z = zc düzleminden ikiye böl (kesik yüzler kapatılır)
-function cutObject(o, zc) {
-  const lowerList = [], upperList = [];
+function cutObject(o, zc, pin) {
+  const lowerList = [], upperList = [], sections = [], negSec = [];
   objParts(o).forEach(p => {
     const g = p.geom.clone(); g.scale(o.sx, o.sy, o.sz); g.rotateZ(o.rotZ);
     const r = cutMesh(g.attributes.position.array, zc);
-    if (r.lower.length) lowerList.push({ name: p.name, positions: r.lower, slot: p.slot, flowMul: p.flowMul });
-    if (r.upper.length) upperList.push({ name: p.name, positions: r.upper, slot: p.slot, flowMul: p.flowMul });
+    if (p.role !== 'negative') sections.push(...r.sections); else negSec.push(...r.sections.map(q => q.outer));
+    if (r.lower.length) lowerList.push({ name: p.name, positions: r.lower, slot: p.slot, flowMul: p.flowMul, role: p.role });
+    if (r.upper.length) upperList.push({ name: p.name, positions: r.upper, slot: p.slot, flowMul: p.flowMul, role: p.role });
   });
+  let pins = [];
+  if (pin && lowerList.length && upperList.length) {
+    const rh = pin.d / 2 + pin.tol / 2;
+    pins = pinSpots(sections.map(q => ({ outer: q.outer, holes: q.holes.concat(negSec) })), pin.n, rh + 1.2);
+    pins.forEach((q, i) => {
+      const hl = Math.min(pin.h, zc - 0.6);
+      lowerList.push({ name: `Pim deliği ${i + 1}`, positions: cylPositions(q.x, q.y, rh, zc - hl, zc + 0.02), slot: 0, role: 'negative' });
+      upperList.push({ name: `Pim deliği ${i + 1}`, positions: cylPositions(q.x, q.y, rh, zc - 0.02, zc + pin.h), slot: 0, role: 'negative' });
+    });
+    if (!pins.length) toast('Kesit pim için çok dar; pimsiz kesildi.', true);
+  }
   const ox = o.x, oy = o.y, name = o.name;
   objParts(o).forEach(p => partsGroup.remove(p.mesh));
   parts = parts.filter(p => p.obj !== o); objects = objects.filter(q => q !== o); selObj = null;
@@ -1021,11 +1052,16 @@ function cutObject(o, zc) {
     upperList.forEach(u => { for (let i = 2; i < u.positions.length; i += 3) u.positions[i] -= zc; });
     addParts(upperList, false, true, true); const up = objects[objects.length - 1]; up.name = name + ' (üst)'; placeFree(up);
   }
+  if (pins.length) {
+    const L = Math.max(2, Math.min(pin.h, zc - 0.6) + pin.h - 0.8);
+    addParts(pins.map((q, i) => ({ name: 'Pim', positions: cylPositions(i * (pin.d + 4), 0, pin.d / 2, 0, L), slot: lowerList[0].slot || 0 })), false, true, true);
+    const po = objects[objects.length - 1]; po.name = `Pimler (${pins.length} adet, Ø${pin.d})`; placeFree(po);
+  }
   placeAll(); clearPreview(); renderParts(); renderObj(); focusModels();
   toast('Nesne ikiye kesildi.');
 }
 function cutMesh(a, zc) {
-  const lower = [], upper = [], segs = [];
+  const lower = [], upper = [], segs = [], sections = [];
   const P = (i) => [a[i * 3], a[i * 3 + 1], a[i * 3 + 2]];
   const lerp = (p, q) => { const t = (zc - p[2]) / (q[2] - p[2]); return [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t, zc]; };
   for (let t = 0; t < a.length / 9; t++) {
@@ -1069,6 +1105,7 @@ function cutMesh(a, zc) {
     const holes = loops.filter((h, j) => depth[j] === depth[i] + 1 && inside(h[0], outer));
     let o2 = outer; if (THREE.ShapeUtils.isClockWise(o2)) o2 = o2.slice().reverse();
     const hs = holes.map(h => THREE.ShapeUtils.isClockWise(h) ? h : h.slice().reverse());
+    sections.push({ outer: o2, holes: hs });
     let faces = [];
     try { faces = THREE.ShapeUtils.triangulateShape(o2, hs); } catch (e) { faces = []; }
     const verts = o2.concat(...hs);
@@ -1078,7 +1115,50 @@ function cutMesh(a, zc) {
       upper.push(p0.x, p0.y, zc, p2.x, p2.y, zc, p1.x, p1.y, zc);       // üst parçanın alt kapağı (aşağı bakar)
     });
   });
-  return { lower: new Float32Array(lower), upper: new Float32Array(upper) };
+  return { lower: new Float32Array(lower), upper: new Float32Array(upper), sections };
+}
+// Kesitte pim yeri: kenarlardan en az `clear` uzaktaki noktalar arasından n tane (1: en içteki, 2+: birbirinden en uzak)
+function pinSpots(sections, n, clear) {
+  if (!sections.length) return [];
+  const area = (pts) => Math.abs(THREE.ShapeUtils.area(pts));
+  const sec = sections.slice().sort((A, B) => area(B.outer) - area(A.outer))[0];
+  const polys = [sec.outer, ...sec.holes];
+  const inPoly = (x, y, poly) => { let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) if (((poly[i].y > y) !== (poly[j].y > y)) && x < (poly[j].x - poly[i].x) * (y - poly[i].y) / (poly[j].y - poly[i].y) + poly[i].x) c = !c; return c; };
+  const segD = (x, y, a, b) => { const dx = b.x - a.x, dy = b.y - a.y, L = dx * dx + dy * dy || 1e-9; let t = ((x - a.x) * dx + (y - a.y) * dy) / L; t = Math.max(0, Math.min(1, t)); return Math.hypot(x - a.x - t * dx, y - a.y - t * dy); };
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  sec.outer.forEach(p => { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); });
+  const step = Math.max(0.5, Math.max(x1 - x0, y1 - y0) / 60), cand = [];
+  for (let x = x0 + step / 2; x < x1; x += step) for (let y = y0 + step / 2; y < y1; y += step) {
+    if (!inPoly(x, y, sec.outer) || sec.holes.some(h => inPoly(x, y, h))) continue;
+    let d = Infinity; polys.forEach(pl => { for (let i = 0, j = pl.length - 1; i < pl.length; j = i++) d = Math.min(d, segD(x, y, pl[j], pl[i])); });
+    if (d >= clear) cand.push({ x, y, d });
+  }
+  if (!cand.length) return [];
+  if (n <= 1) return [cand.reduce((A, B) => (B.d > A.d ? B : A))];
+  // en uzak iki nokta, sonra diğerleri seçilenlere en uzak olanlar
+  let best = [cand[0], cand[0]], bd = -1;
+  const smp = cand.length > 1500 ? cand.filter((_, i) => i % Math.ceil(cand.length / 1500) === 0) : cand;
+  for (let i = 0; i < smp.length; i++) for (let j = i + 1; j < smp.length; j++) { const d = Math.hypot(smp[i].x - smp[j].x, smp[i].y - smp[j].y); if (d > bd) { bd = d; best = [smp[i], smp[j]]; } }
+  if (bd < clear * 2) return [cand.reduce((A, B) => (B.d > A.d ? B : A))];
+  // uçtan biraz içeri çek (kenara çok yakın olmasın): iki noktayı ortaya doğru %15 yaklaştır, yine de geçerli adaylara oturt
+  const mx = (best[0].x + best[1].x) / 2, my = (best[0].y + best[1].y) / 2;
+  const snap = (p) => { const t = { x: p.x + (mx - p.x) * 0.15, y: p.y + (my - p.y) * 0.15 }; return cand.reduce((A, B) => (Math.hypot(B.x - t.x, B.y - t.y) < Math.hypot(A.x - t.x, A.y - t.y) ? B : A)); };
+  const out = [snap(best[0]), snap(best[1])];
+  while (out.length < n) {
+    const nx = cand.reduce((A, B) => { const da = Math.min(...out.map(q => Math.hypot(A.x - q.x, A.y - q.y))), db = Math.min(...out.map(q => Math.hypot(B.x - q.x, B.y - q.y))); return db > da ? B : A; });
+    if (Math.min(...out.map(q => Math.hypot(nx.x - q.x, nx.y - q.y))) < clear * 2) break;
+    out.push(nx);
+  }
+  return out;
+}
+// z0..z1 arasında silindir (üçgen dizisi)
+function cylPositions(cx, cy, r, z0, z1, seg = 48) {
+  const g = new THREE.CylinderGeometry(r, r, z1 - z0, seg).rotateX(Math.PI / 2).translate(cx, cy, (z0 + z1) / 2);
+  return new Float32Array((g.index ? g.toNonIndexed() : g).attributes.position.array);
+}
+function boxPositions(cx, cy, w, d, z0, z1) {
+  const g = new THREE.BoxGeometry(w, d, z1 - z0).translate(cx, cy, (z0 + z1) / 2);
+  return new Float32Array((g.index ? g.toNonIndexed() : g).attributes.position.array);
 }
 
 // ---------------- tablada seçme ve sürükleme (fare ve dokunmatik)
@@ -1194,7 +1274,7 @@ $('split').addEventListener('click', () => {
       ts.forEach((t, j) => arr.set(pos.subarray(t * 9, t * 9 + 9), j * 9));
       const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(arr, 3));
       const mesh = new THREE.Mesh(new THREE.BufferGeometry(), partMaterial(p.slot)); partsGroup.add(mesh);
-      keep.push({ name: `${p.name} #${k++}`, geom: g, slot: p.slot, mesh, flowMul: p.flowMul, obj: p.obj });
+      keep.push({ name: `${p.name} #${k++}`, geom: g, slot: p.slot, mesh, flowMul: p.flowMul, obj: p.obj, role: p.role });
       made++;
     });
   });
@@ -1375,7 +1455,7 @@ async function saveProject() {
   const live = objects.filter(o => objParts(o).length);
   const blob = await writeProject({
     objects: live,
-    parts: parts.map(p => ({ name: p.name, positions: p.geom.attributes.position.array, slot: p.slot, flowMul: p.flowMul, obj: live.indexOf(p.obj) })),
+    parts: parts.map(p => ({ name: p.name, positions: p.geom.attributes.position.array, slot: p.slot, flowMul: p.flowMul, obj: live.indexOf(p.obj), role: p.role })),
     settings: { printer: state.printer, process: state.process, slots: state.slots, flush: state.flush },
     app: { name: 'K1MaxDilimleyici', version: APP_VERSION },
   });
@@ -1389,7 +1469,7 @@ async function loadProject(proj, fileName, replace) {
   if (replace) { parts.forEach(p => { partsGroup.remove(p.mesh); p.mesh.geometry.dispose(); }); parts = []; objects = []; selObj = null; }
   const objs = proj.objects.map(m => {
     const o = { id: ++objSeq, name: m.name || ('Nesne ' + objSeq), x: +m.x || 0, y: +m.y || 0, rotZ: +m.rotZ || 0, sx: +m.sx || 1, sy: +m.sy || 1, sz: +m.sz || 1,
-      origin: Object.assign({ x: 0, y: 0, z: 0 }, m.origin) };
+      origin: Object.assign({ x: 0, y: 0, z: 0 }, m.origin), ranges: Array.isArray(m.ranges) ? m.ranges : undefined };
     objects.push(o); return o;
   });
   proj.parts.forEach(p => {
@@ -1397,7 +1477,7 @@ async function loadProject(proj, fileName, replace) {
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(p.positions, 3));
     const slot = Math.min(SLOT_COUNT - 1, Math.max(0, p.slot));
     const mesh = new THREE.Mesh(new THREE.BufferGeometry(), partMaterial(slot)); partsGroup.add(mesh);
-    parts.push({ name: p.name, geom: g, slot, mesh, flowMul: p.flowMul, obj: o });
+    parts.push({ name: p.name, geom: g, slot, mesh, flowMul: p.flowMul, obj: o, role: p.role === 'negative' ? 'negative' : undefined });
   });
   objects = objects.filter(o => objParts(o).length);
   if (!replace) objs.forEach(o => placeFree(o));
@@ -1577,7 +1657,8 @@ const PV = 11;
 function buildJob() {
   const S = Object.assign({}, state.printer.values, state.process.values);
   const fils = state.slots.map(sl => Object.assign({}, sl.values, { color: sl.color, name: sl.name }));
-  const jobParts = parts.map(p => ({ name: p.name, slot: p.slot, flowMul: p.flowMul || 1, positions: worldGeom(p).attributes.position.array }));
+  const jobParts = parts.map(p => ({ name: p.name, slot: p.slot, flowMul: p.flowMul || 1, positions: worldGeom(p).attributes.position.array, role: p.role,
+    ranges: p.obj && p.obj.ranges && p.obj.ranges.length ? p.obj.ranges.map(r => ({ z0: r.z0, z1: r.z1, S: r.S })) : undefined }));
   const F = state.flush;
   const job = { parts: jobParts, S, fils, flush: F && F.on ? F.m.map(row => row.map(v => Math.max(0, v * F.mult))) : null };
   if (calibMode) {
@@ -2277,6 +2358,7 @@ async function detectStartLine() {
     const cfg = ((((json(r) || {}).result || {}).status || {}).configfile || {}).config || {};
     const macros = {};
     Object.keys(cfg).forEach(k => { const m = k.match(/^gcode_macro\s+(\S+)$/i); if (m) macros[m[1].toLowerCase()] = cfg[k]; });
+    dev.timelapseMacro = !!macros.timelapse_take_frame;
     const start = macros.start_print;
     if (!start || !start.gcode) return;
     let info = null;
@@ -2454,6 +2536,8 @@ async function upload(start) {
     await pollStatus();
     if (dev.state === 'printing' || dev.state === 'paused') { toast('Yazıcı şu an başka bir baskıda. Dosya yalnızca yüklenecek.', true); start = false; }
   }
+  if ((state.printer.values.timelapse || 'none') !== 'none' && dev.timelapseMacro === false)
+    toast('Uyarı: yazıcıda TIMELAPSE_TAKE_FRAME makrosu bulunamadı. moonraker-timelapse kurulu değilse kare alınmaz (Klipper komutu tanımaz). Eklentiyi kurun ya da timelapse ayarını kapatın.', true);
   const fields = { root: 'gcodes' };
   if (state.printer.values.uploadFolder) fields.path = state.printer.values.uploadFolder;
   if (start) fields.print = 'true';
@@ -2623,3 +2707,207 @@ try {
       [[null, 'Kapat', 'primary']], () => { $('crashText').value = crash; });
   }
 } catch (e) { /* yok */ }
+
+// ================================================================= nesneye özel: yükseklik aralığı, negatif şekil, yazı
+// Nesnenin yerel geometri kutusu (ölçeksiz). Pozitif parçalar esas alınır.
+function objLocalBox(o) {
+  const b = new THREE.Box3();
+  objParts(o).filter(p => p.role !== 'negative').forEach(p => { p.geom.computeBoundingBox(); b.union(p.geom.boundingBox); });
+  if (b.isEmpty()) objParts(o).forEach(p => { p.geom.computeBoundingBox(); b.union(p.geom.boundingBox); });
+  return b;
+}
+// Dünya ölçüsünde (mm) üretilmiş, nesne merkezine göre konumlu üçgenleri nesnenin yerel koordinatına çevirip ekle
+function addLocalPart(o, name, worldPos, role, slot) {
+  const c = Math.cos(-o.rotZ), s = Math.sin(-o.rotZ), a = worldPos;
+  for (let i = 0; i < a.length; i += 3) {
+    const x = a[i], y = a[i + 1];
+    a[i] = (x * c - y * s) / o.sx + o.origin.x; a[i + 1] = (x * s + y * c) / o.sy + o.origin.y; a[i + 2] = a[i + 2] / o.sz + o.origin.z;
+  }
+  const sel = selObj; selObj = o;
+  addParts([{ name, positions: a, slot: slot || 0, role }], false, true, false, { noNormalize: true });
+  selObj = sel;
+}
+
+// ---- yükseklik aralıkları (Orca: height range modifier)
+function rangePatterns() { return (() => { const it = PROCESS_SCHEMA.flatMap(g => g.items).find(i => i.k === 'infillPattern'); const o = Object.assign({}, it ? it.o : { grid: 'Izgara' }); delete o.lightning; delete o.adaptivecubic; return o; })(); }
+function renderRanges() {
+  const box = $('rangeBox'); if (!box) return;
+  box.innerHTML = '';
+  const o = selObj; if (!o || !o.ranges || !o.ranges.length) return;
+  const P = state.process.values;
+  o.ranges.forEach((r, i) => {
+    const d = document.createElement('div'); d.className = 'rng';
+    const pat = Object.entries(rangePatterns()).map(([k, l]) => `<option value="${k}">${escapeHtml(l)}</option>`).join('');
+    d.innerHTML = `<div class="rngHead"><b>Aralık ${i + 1}</b><button class="btn small danger" data-k="del">Kaldır</button></div>
+      <label>Başlangıç Z (mm)<input type="number" step="0.2" data-k="z0"></label>
+      <label>Bitiş Z (mm)<input type="number" step="0.2" data-k="z1"></label>
+      <label>Duvar sayısı<input type="number" step="1" min="1" max="20" data-k="wallLoops" placeholder="${P.wallLoops}"></label>
+      <label>Dolgu yoğunluğu (%)<input type="number" step="1" min="0" max="100" data-k="infillDensity" placeholder="${P.infillDensity}"></label>
+      <label>Dolgu deseni<select data-k="infillPattern"><option value="">(genel ayar)</option>${pat}</select></label>
+      <label>Dolgu hızı (mm/s)<input type="number" step="5" min="5" max="600" data-k="sparseInfillSpeed" placeholder="${P.sparseInfillSpeed}"></label>`;
+    d.querySelectorAll('[data-k]').forEach(el => {
+      const k = el.dataset.k;
+      if (k === 'del') { el.onclick = () => { o.ranges.splice(i, 1); renderRanges(); clearPreview(); }; return; }
+      el.value = k === 'z0' || k === 'z1' ? r[k] : (r.S[k] !== undefined ? r.S[k] : '');
+      el.onchange = () => {
+        const v = el.value;
+        if (k === 'z0' || k === 'z1') r[k] = Math.max(0, +v || 0);
+        else if (v === '') delete r.S[k];
+        else r.S[k] = k === 'infillPattern' ? v : +v;
+        if (r.z1 < r.z0) { const t = r.z0; r.z0 = r.z1; r.z1 = t; }
+        clearPreview(); renderRanges();
+      };
+    });
+    box.appendChild(d);
+  });
+  const h = document.createElement('p'); h.className = 'hint';
+  h.textContent = 'Z değerleri tabladan yüksekliktir. Boş bırakılan alanlarda genel ayar kullanılır. Ör. vida dişi olan kısmı 6 duvar, gövdeyi %10 dolgu ile basmak için.';
+  box.appendChild(h);
+}
+$('objRange').addEventListener('click', () => {
+  const o = selObj; if (!o) return;
+  const H = (objLocalBox(o).max.z - objLocalBox(o).min.z) * o.sz;
+  o.ranges = o.ranges || [];
+  const last = o.ranges.length ? o.ranges[o.ranges.length - 1].z1 : 0;
+  o.ranges.push({ z0: +Math.min(last, H).toFixed(1), z1: +Math.min(H, last + Math.max(2, H / 3)).toFixed(1), S: { wallLoops: Math.max(4, (state.process.values.wallLoops | 0) + 2), infillDensity: 40 } });
+  renderRanges(); clearPreview();
+});
+
+// ---- negatif şekil (delik / oyuk)
+$('objNeg').addEventListener('click', async () => {
+  const o = selObj; if (!o) return;
+  const b = objLocalBox(o), H = (b.max.z - b.min.z) * o.sz;
+  const r = await dialog('Negatif şekil ekle', `<div class="dlgGrid">
+      <label class="full">Şekil<select id="ngShape"><option value="cyl">Silindir (delik)</option><option value="box">Kutu (oyuk/yuva)</option></select></label>
+      <label>Çap / genişlik X (mm)<input type="number" id="ngW" step="0.1" value="5"></label>
+      <label>Derinlik Y (kutu, mm)<input type="number" id="ngD" step="0.1" value="5"></label>
+      <label>Kaydır X (mm)<input type="number" id="ngX" step="0.5" value="0"></label>
+      <label>Kaydır Y (mm)<input type="number" id="ngY" step="0.5" value="0"></label>
+      <label>Alt Z (mm)<input type="number" id="ngZ0" step="0.2" value="-1"></label>
+      <label>Üst Z (mm)<input type="number" id="ngZ1" step="0.2" value="${(H + 1).toFixed(1)}"></label>
+    </div><p class="hint">Kaydırma nesnenin ortasına göredir (nesnenin dönüşü hesaba katılmaz: tabla eksenleri). Varsayılan: baştan sona geçen delik. Şekil kırmızı yarı saydam görünür; parça listesinden türü "Model" yapılarak normal parçaya da çevrilebilir.</p>`,
+    [[null, 'Vazgeç'], [() => ({ shape: $('ngShape').value, w: Math.max(0.2, +$('ngW').value || 5), d: Math.max(0.2, +$('ngD').value || 5), x: +$('ngX').value || 0, y: +$('ngY').value || 0, z0: +$('ngZ0').value, z1: +$('ngZ1').value }), 'Ekle', 'primary']]);
+  if (!r || !(r.z1 > r.z0)) return;
+  const pos = r.shape === 'cyl' ? cylPositions(r.x, r.y, r.w / 2, r.z0, r.z1, 64) : boxPositions(r.x, r.y, r.w, r.d, r.z0, r.z1);
+  addLocalPart(o, r.shape === 'cyl' ? `Delik Ø${r.w}` : `Oyuk ${r.w}×${r.d}`, pos, 'negative');
+  placeAll(); clearPreview(); renderParts(); renderObj();
+  toast('Negatif şekil eklendi.');
+});
+
+// ---- yazı (kabartma / oyma / ayrı nesne)
+// Metni tuvale çizip kenar çizgilerini (kare yürütme) çıkarır; THREE.Shape listesi döner (mm, merkez 0)
+function textShapes(text, sizeMm, bold) {
+  const px = 140, font = `${bold ? '700' : '500'} ${px}px "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif`;
+  const cv = document.createElement('canvas'), ctx = cv.getContext('2d');
+  ctx.font = font;
+  const lines = text.split('\n'), lh = px * 1.2;
+  const W = Math.ceil(Math.max(...lines.map(l => ctx.measureText(l).width))) + 24, Hh = Math.ceil(lh * lines.length) + 24;
+  if (W * Hh > 2.5e7) throw new Error('Yazı çok uzun');
+  cv.width = W; cv.height = Hh;
+  ctx.font = font; ctx.fillStyle = '#000'; ctx.textBaseline = 'top'; ctx.textAlign = 'center';
+  lines.forEach((l, i) => ctx.fillText(l, W / 2, 12 + i * lh));
+  const img = ctx.getImageData(0, 0, W, Hh).data, val = (x, y) => (x < 0 || y < 0 || x >= W || y >= Hh) ? -0.5 : img[(y * W + x) * 4 + 3] / 255 - 0.5;
+  const segs = [], P = (x1, y1, x2, y2) => { const a = val(x1, y1), b = val(x2, y2), t = a / (a - b); return [x1 + (x2 - x1) * t, y1 + (y2 - y1) * t]; };
+  for (let y = -1; y < Hh; y++) for (let x = -1; x < W; x++) {
+    const b0 = val(x, y) > 0, b1 = val(x + 1, y) > 0, b2 = val(x + 1, y + 1) > 0, b3 = val(x, y + 1) > 0;
+    if (b0 === b1 && b1 === b2 && b2 === b3) continue;
+    const e = [];
+    if (b0 !== b1) e.push(P(x, y, x + 1, y)); if (b1 !== b2) e.push(P(x + 1, y, x + 1, y + 1));
+    if (b2 !== b3) e.push(P(x, y + 1, x + 1, y + 1)); if (b3 !== b0) e.push(P(x, y, x, y + 1));
+    if (e.length === 2) segs.push(e); else if (e.length === 4) { segs.push([e[0], e[1]], [e[2], e[3]]); }
+  }
+  // parçaları halkalara zincirle
+  const key = p => Math.round(p[0] * 64) + ',' + Math.round(p[1] * 64), ends = new Map(), used = new Uint8Array(segs.length), loops = [];
+  segs.forEach((s2, i) => s2.forEach(p => { const k = key(p); if (!ends.has(k)) ends.set(k, []); ends.get(k).push(i); }));
+  for (let i = 0; i < segs.length; i++) {
+    if (used[i]) continue; used[i] = 1;
+    const loop = [segs[i][0], segs[i][1]];
+    for (let g = 0; g < 1e6; g++) {
+      const k = key(loop[loop.length - 1]), nx = (ends.get(k) || []).find(j => !used[j]);
+      if (nx === undefined) break;
+      used[nx] = 1; const s2 = segs[nx]; loop.push(key(s2[0]) === k ? s2[1] : s2[0]);
+    }
+    if (loop.length > 4) loops.push(loop);
+  }
+  // sadeleştir (Douglas–Peucker, 0.35 piksel) ve mm'ye çevir (y yukarı)
+  const k = sizeMm / px;
+  const dp = (l, tol) => { const keep = new Uint8Array(l.length); keep[0] = keep[l.length - 1] = 1; const st = [[0, l.length - 1]];
+    while (st.length) { const [a, b] = st.pop(); let mx = -1, mi = -1; const dx = l[b][0] - l[a][0], dy = l[b][1] - l[a][1], L = Math.hypot(dx, dy) || 1e-9;
+      for (let i = a + 1; i < b; i++) { const d = Math.abs((l[i][0] - l[a][0]) * dy - (l[i][1] - l[a][1]) * dx) / L; if (d > mx) { mx = d; mi = i; } }
+      if (mx > tol) { keep[mi] = 1; st.push([a, mi], [mi, b]); } }
+    return l.filter((_, i) => keep[i]); };
+  // kapalı halka: başı ve sonu aynı nokta; başa en uzak noktadan ikiye bölüp ayrı ayrı sadeleştir
+  const dpClosed = (l, tol) => { if (key(l[0]) === key(l[l.length - 1])) l = l.slice(0, -1);
+    let m = 0, md = -1; l.forEach((q, i) => { const d = Math.hypot(q[0] - l[0][0], q[1] - l[0][1]); if (d > md) { md = d; m = i; } });
+    return dp(l.slice(0, m + 1), tol).concat(dp(l.slice(m).concat([l[0]]), tol).slice(1, -1)); };
+  const polys = loops.map(l => dpClosed(l, 0.35).map(p => new THREE.Vector2((p[0] - W / 2) * k, (Hh / 2 - p[1]) * k))).filter(l => l.length >= 3 && Math.abs(THREE.ShapeUtils.area(l)) > 1e-4);
+  const inside = (pt, poly) => { let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) if (((poly[i].y > pt.y) !== (poly[j].y > pt.y)) && pt.x < (poly[j].x - poly[i].x) * (pt.y - poly[i].y) / (poly[j].y - poly[i].y) + poly[i].x) c = !c; return c; };
+  const depth = polys.map((l, i) => polys.reduce((d, m, j) => d + (i !== j && inside(l[0], m) ? 1 : 0), 0));
+  const shapes = [];
+  polys.forEach((outer, i) => {
+    if (depth[i] % 2) return;
+    const o2 = THREE.ShapeUtils.isClockWise(outer) ? outer.slice().reverse() : outer;
+    const sh = new THREE.Shape(o2);
+    polys.forEach((h, j) => { if (depth[j] === depth[i] + 1 && inside(h[0], outer)) sh.holes.push(new THREE.Path(THREE.ShapeUtils.isClockWise(h) ? h : h.slice().reverse())); });
+    shapes.push(sh);
+  });
+  return shapes;
+}
+function textPositions(shapes, z0, z1, angleDeg, ox, oy) {
+  const g = new THREE.ExtrudeGeometry(shapes, { depth: z1 - z0, bevelEnabled: false, curveSegments: 1 });
+  g.rotateZ((angleDeg || 0) * Math.PI / 180); g.translate(ox || 0, oy || 0, z0);
+  return new Float32Array((g.index ? g.toNonIndexed() : g).attributes.position.array);
+}
+$('objText').addEventListener('click', async () => {
+  const o = selObj; if (!o) return;
+  const b = objLocalBox(o), sw = (b.max.x - b.min.x) * o.sx, top = (b.max.z - b.min.z) * o.sz;
+  const r = await dialog('Yazı ekle', `<div class="dlgGrid">
+      <label class="full">Metin<textarea id="txT" rows="2" style="min-height:52px">K1 Max</textarea></label>
+      <label class="full">Tür<select id="txMode"><option value="emboss">Kabartma (üst yüzeyde, nesneyle aynı renk)</option><option value="color">Kabartma, başka renk (CFS yuvası)</option><option value="engrave">Oyma (negatif)</option><option value="object">Ayrı nesne</option></select></label>
+      <label>Harf boyu (mm)<input type="number" id="txS" step="0.5" min="2" value="${Math.max(4, Math.min(20, sw / 6)).toFixed(1)}"></label>
+      <label>Kalınlık / derinlik (mm)<input type="number" id="txD" step="0.2" min="0.2" value="1"></label>
+      <label>Açı (°)<input type="number" id="txA" step="5" value="0"></label>
+      <label>Yuva (renkli kabartma)<select id="txSlot">${state.slots.map((s2, i) => `<option value="${i}">Yuva ${i + 1}</option>`).join('')}</select></label>
+      <label>Kaydır X (mm)<input type="number" id="txX" step="0.5" value="0"></label>
+      <label>Kaydır Y (mm)<input type="number" id="txY" step="0.5" value="0"></label>
+      <label class="full"><span><input type="checkbox" id="txB" checked> Kalın yazı</span></label>
+    </div><p class="hint">Yazı, altındaki yüzeyin en yüksek noktasına oturur; eğimli yüzeyde düz bir yere kaydırın. İnce harfler için harf boyunu en az 5 mm, kabartmayı 0.6 mm ve üzeri seçin.</p>`,
+    [[null, 'Vazgeç'], [() => ({ t: $('txT').value.trim(), mode: $('txMode').value, s: Math.max(2, +$('txS').value || 8), d: Math.max(0.2, +$('txD').value || 1), a: +$('txA').value || 0,
+      slot: +$('txSlot').value || 0, x: +$('txX').value || 0, y: +$('txY').value || 0, bold: $('txB').checked }), 'Ekle', 'primary']],
+    () => { const t = $('txT'); t.focus(); t.select(); });
+  if (!r || !r.t) return;
+  let shapes;
+  try { shapes = textShapes(r.t, r.s, r.bold); } catch (e) { toast('Yazı oluşturulamadı: ' + e.message, true); return; }
+  if (!shapes.length) { toast('Yazıdan şekil çıkmadı.', true); return; }
+  // yazının altındaki yüzey: yazı alanında birkaç noktadan aşağı ışın gönder, en yüksek değeni al (kabartma oturur)
+  let surf = top;
+  if (r.mode !== 'object') {
+    placeAll();
+    const bb = new THREE.Box2(); shapes.forEach(sh => sh.getPoints().forEach(q => bb.expandByPoint(q)));
+    const ca = Math.cos(r.a * Math.PI / 180), sa = Math.sin(r.a * Math.PI / 180);
+    const meshes = objParts(o).filter(p => p.role !== 'negative').map(p => { p.mesh.updateMatrixWorld(true); return p.mesh; });
+    const rc = new THREE.Raycaster(); let hz = -Infinity, hits = 0;
+    for (let i = 0; i <= 4; i++) for (let j = 0; j <= 2; j++) {
+      const lx = bb.min.x + (bb.max.x - bb.min.x) * i / 4, ly = bb.min.y + (bb.max.y - bb.min.y) * j / 2;
+      const tx = lx * ca - ly * sa + r.x, ty = lx * sa + ly * ca + r.y;          // nesne merkezine göre (tabla eksenleri)
+      rc.set(new THREE.Vector3(o.x + tx, o.y + ty, top + 50), new THREE.Vector3(0, 0, -1));
+      const h = rc.intersectObjects(meshes, false)[0];
+      if (h) { hz = Math.max(hz, h.point.z); hits++; }
+    }
+    if (hits) surf = hz;
+    if (hits && hits < 15) toast('Yazının bir kısmı nesnenin dışına taşıyor; kaydırma ya da harf boyunu değiştirin.', true);
+  }
+  const name = 'Yazı: ' + r.t.replace(/\s+/g, ' ').slice(0, 20);
+  if (r.mode === 'object') {
+    addParts([{ name, positions: textPositions(shapes, 0, r.d, r.a), slot: r.slot }], false, true, true);
+    const no = objects[objects.length - 1]; no.name = name; placeFree(no);
+  } else if (r.mode === 'engrave') {
+    addLocalPart(o, name, textPositions(shapes, surf - r.d, surf + 1, r.a, r.x, r.y), 'negative');
+  } else {
+    // kabartma: alttan 0.05 mm gömülü (yüzeyle kaynaşsın); renkli kabartmada ayrı yuva
+    const own = objParts(o).find(p => p.role !== 'negative');
+    addLocalPart(o, name, textPositions(shapes, surf - 0.05, surf + r.d, r.a, r.x, r.y), undefined, r.mode === 'color' ? r.slot : (own ? own.slot : 0));
+  }
+  placeAll(); clearPreview(); renderParts(); renderObj(); focusModels();
+  toast('Yazı eklendi.');
+});

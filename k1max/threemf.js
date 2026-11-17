@@ -174,7 +174,7 @@ export async function load3MF(buffer) {
           parts.push({ name: vo.name || ctx.name, positions: toPositions(mesh, tf, scale, vo.first, vo.last), ext: vo.ext || ctx.ext });
         });
       } else {
-        parts.push({ name: ctx.partName || obj.getAttribute('name') || ctx.name, positions: toPositions(mesh, tf, scale), ext: ctx.partExt || ctx.ext });
+        parts.push({ name: ctx.partName || obj.getAttribute('name') || ctx.name, positions: toPositions(mesh, tf, scale), ext: ctx.partExt || ctx.ext, role: ctx.partRole });
       }
       return;
     }
@@ -183,9 +183,9 @@ export async function load3MF(buffer) {
       const c = comps[i];
       const cPath = attr(c, 'p:path') || c.getAttribute('p:path') || path;
       const pinfo = ctx.depth0 ? (orca[ctx.top] && orca[ctx.top].parts[String(i + 1)]) : null;
-      if (pinfo && pinfo.subtype && pinfo.subtype !== 'normal_part') continue; // değiştirici / negatif hacim
+      if (pinfo && pinfo.subtype && pinfo.subtype !== 'normal_part' && pinfo.subtype !== 'negative_part') continue; // değiştirici / destek boyası hacmi
       await expand(cPath, c.getAttribute('objectid'), mul(parseTf(c.getAttribute('transform')), tf),
-        Object.assign({}, ctx, { depth0: false, partName: pinfo && pinfo.name, partExt: pinfo && pinfo.ext }), depth + 1);
+        Object.assign({}, ctx, { depth0: false, partName: pinfo && pinfo.name, partExt: pinfo && pinfo.ext, partRole: pinfo && pinfo.subtype === 'negative_part' ? 'negative' : undefined }), depth + 1);
     }
   }
   const items = els(main, 'item');
@@ -199,5 +199,5 @@ export async function load3MF(buffer) {
   }
   if (!parts.length) throw new Error('3MF içinde basılabilir model bulunamadı');
   if (painted) warnings.push('Bu 3MF boyama ile renklendirilmiş; boyamalar desteklenmiyor, parçalar tek renk yüklendi.');
-  return { parts: parts.map(p => ({ name: p.name, positions: p.positions, slot: Math.max(0, Math.min(3, (p.ext || 1) - 1)) })), warnings };
+  return { parts: parts.map(p => ({ name: p.name, positions: p.positions, slot: Math.max(0, Math.min(3, (p.ext || 1) - 1)), role: p.role })), warnings };
 }

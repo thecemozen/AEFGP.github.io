@@ -93,14 +93,14 @@ export async function writeProject({ objects, parts, settings, app }) {
       const mid = ++id;
       res.push(`<object id="${mid}" type="model" name="${esc(p.name)}">${meshXml(p.positions)}</object>`);
       comps.push(`<component objectid="${mid}"/>`);
-      cfgParts.push(`<part id="${k + 1}" subtype="normal_part"><metadata key="name" value="${esc(p.name)}"/><metadata key="extruder" value="${(p.slot || 0) + 1}"/></part>`);
-      meta.parts.push({ name: p.name, slot: p.slot || 0, flowMul: p.flowMul || 1, obj: mo, meshId: mid });
+      cfgParts.push(`<part id="${k + 1}" subtype="${p.role === 'negative' ? 'negative_part' : 'normal_part'}"><metadata key="name" value="${esc(p.name)}"/><metadata key="extruder" value="${(p.slot || 0) + 1}"/></part>`);
+      meta.parts.push({ name: p.name, slot: p.slot || 0, flowMul: p.flowMul || 1, obj: mo, meshId: mid, role: p.role || undefined });
     });
     const gid = ++id;
     res.push(`<object id="${gid}" type="model" name="${esc(o.name)}"><components>${comps.join('')}</components></object>`);
     build.push(`<item objectid="${gid}" transform="${objTransform(o)}" printable="1"/>`);
     cfg.push(`<object id="${gid}"><metadata key="name" value="${esc(o.name)}"/><metadata key="extruder" value="${(own[0].p.slot || 0) + 1}"/>${cfgParts.join('')}</object>`);
-    meta.objects.push({ name: o.name, x: o.x, y: o.y, rotZ: o.rotZ, sx: o.sx, sy: o.sy, sz: o.sz, origin: o.origin, groupId: gid });
+    meta.objects.push({ name: o.name, x: o.x, y: o.y, rotZ: o.rotZ, sx: o.sx, sy: o.sy, sz: o.sz, origin: o.origin, groupId: gid, ranges: o.ranges && o.ranges.length ? o.ranges : undefined });
   });
   const model = '<?xml version="1.0" encoding="UTF-8"?>\n' +
     '<model unit="millimeter" xml:lang="tr-TR" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">' +
@@ -130,7 +130,7 @@ export async function readProject(buffer) {
     if (!m) throw new Error('projede parça ağı eksik: ' + p.name);
     const pos = new Float32Array(m.t.length * 3);
     for (let i = 0; i < m.t.length; i++) { const v = m.t[i] * 3; pos[i * 3] = m.v[v]; pos[i * 3 + 1] = m.v[v + 1]; pos[i * 3 + 2] = m.v[v + 2]; }
-    parts.push({ name: p.name, positions: pos, slot: p.slot | 0, flowMul: +p.flowMul || 1, obj: p.obj | 0 });
+    parts.push({ name: p.name, positions: pos, slot: p.slot | 0, flowMul: +p.flowMul || 1, obj: p.obj | 0, role: p.role === 'negative' ? 'negative' : undefined });
   }
   return { objects: meta.objects, parts, settings: meta.settings || null, app: meta.app };
 }
