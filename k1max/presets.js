@@ -17,16 +17,29 @@ M104 S{nozzle_first}
 START_PRINT EXTRUDER_TEMP={nozzle_first} BED_TEMP={bed_first}
 M190 S{bed_first}
 M109 S{nozzle_first}`;
-export const START_GCODE = `M140 S{bed_first}
+export const START_GCODE_V2 = `M140 S{bed_first}
 START_PRINT EXTRUDER_TEMP={nozzle_first} BED_TEMP={bed_first}
 M190 S{bed_first}
 M109 S{nozzle_first}`;
+// Creality'nin resmi K1 Max CFS profili (OrcaSlicer): START_PRINT'ten sonra ilk yuvayı seç (T), sonra sıcaklığı bekle
+export const START_GCODE = `M140 S{bed_first}
+START_PRINT EXTRUDER_TEMP={nozzle_first} BED_TEMP={bed_first}
+T{initial_tool}
+M190 S{bed_first}
+M109 S{nozzle_first}`;
+// CFS'siz K1 Max'te T komutu yok (Klipper "bilinmeyen komut" verip baskıyı durdurur)
+export const START_GCODE_NO_CFS = START_GCODE_V2;
 
 export const END_GCODE = `END_PRINT`;
 
 // CFS renk değişimi. Firmware sürümünüze göre değişebilir: Creality Print'teki K1 Max (CFS)
 // yazıcı profilinin "Filament değiştirme G-code"unu buraya yapıştırabilirsiniz.
-export const CHANGE_GCODE = `G1 Z{z_lift} F600
+export const OLD_CHANGE_GCODE = `G1 Z{z_lift} F600
+T{next_tool}`;
+// Creality'nin resmi K1 Max CFS renk değişimi (OrcaSlicer profili): sarmal kalkış, sol arka kesme konumuna git, değiştir
+export const CHANGE_GCODE = `G2 Z{z_lift} I0.86 J0.86 P1 F10000 ; sarmal kalkış
+G1 X0 Y245 F30000
+G1 Z{z} F600
 T{next_tool}`;
 
 // ------------------------------------------------------------------ YAZICI
@@ -91,15 +104,15 @@ export const PRINTER_BASE = {
   bedX: 300, bedY: 300, bedZ: 300, nozzleDiameter: 0.4,
   machineMaxAccel: 20000, machineMaxSpeed: 800, squareCornerVelocity: 5, accelToDecel: 50, zSpeed: 15,
   retractLength: 0.8, retractSpeed: 40, deretractSpeed: 40, zHop: 0.2, retractMinTravel: 1.5, retractOnLayerChange: true, avoidCrossingWalls: true, retractOnlyCrossing: true, combMaxDetour: 2, wipe: true, wipeDistance: 1.5, wipeRetractPart: 70,
-  toolChangeLift: 2, toolChangeTime: 45, changeFilamentGcode: CHANGE_GCODE,
+  toolChangeLift: 0.4, toolChangeTime: 45, changeFilamentGcode: CHANGE_GCODE,
   startGcode: START_GCODE, endGcode: END_GCODE, layerChangeGcode: '',
-  labelObjects: false, startLineMode: 'auto', startLineManual: '', startLineInfo: '', thumbnail: true, thumbnailSize: 300,
+  labelObjects: true, startLineMode: 'auto', startLineManual: '', startLineInfo: '', thumbnail: true, thumbnailSize: 300,
   hostIp: '', hostPort: 7125, apiKey: '', uploadFolder: '', timeScale: 1, startupTime: 0,
 };
 
 export const PRINTER_PRESETS = {
   'Creality K1 Max (CFS) 0.4': {},
-  'Creality K1 Max 0.4 (CFS yok)': { toolChangeTime: 0 },
+  'Creality K1 Max 0.4 (CFS yok)': { toolChangeTime: 0, startGcode: START_GCODE_NO_CFS },
 };
 
 // ------------------------------------------------------------------ FİLAMENT
@@ -189,6 +202,7 @@ export const PROCESS_SCHEMA = [
     { k: 'firstLayerHeight', l: 'İlk katman yüksekliği', u: 'mm', t: 'n', min: 0.1, max: 0.35, s: 0.01 },
   ]},
   { g: 'Çözünürlük', sec: 'Kalite', items: [
+    { k: 'onlyOneWallTop', l: 'Üst yüzeyde tek duvar', t: 'b', tip: 'Tamamı üst yüzey olan katmanlarda yalnızca dış duvar basılır, içi üst yüzey çizgileriyle dolar (Orca: only one wall on top). Üst yüzey daha düzgün ve tek parça görünür, süre kısalır.' },
     { k: 'smoothCurves', l: 'Köşeli kavisleri yumuşat', t: 'b', tip: 'Düşük çözünürlükte çizilmiş modellerde kavisler uzun düz parçalardan oluşur ve baskıda köşeli görünür. Açıkken hafif açılı (35°\'den az) köşeler, köşe noktalarından geçen düzgün bir eğriyle değiştirilir; keskin köşeler aynen kalır. Ölçü hassasiyeti gereken teknik parçalarda kapalı tutun.' },
     { k: 'sliceMode', l: 'Kesit modu', t: 's', o: { regular: 'Normal (iç içe gövdeler birleşir)', evenodd: 'Çift-tek (özel modeller)' }, tip: 'Normal: birbirinin içine geçen gövdeler tek parça gibi basılır (OrcaSlicer ile aynı). Çift-tek: üst üste binen bölgeler boş kalır; yalnızca bunun için tasarlanmış modellerde kullanın.', adv: true },
     { k: 'resolution', l: 'Kesit çözünürlüğü', u: 'mm', t: 'n', min: 0, max: 0.1, s: 0.0005, tip: 'Kesitteki bu mesafeden küçük ayrıntılar sadeleştirilir (Orca: 0.012). Milyonlarca üçgenli modellerde dilimlemeyi kat kat hızlandırır; nozulun basabileceği ayrıntı kaybolmaz.', adv: true },
@@ -251,7 +265,9 @@ export const PROCESS_SCHEMA = [
   ]},
   { g: 'Dolgu', sec: 'Dayanıklılık', items: [
     { k: 'infillDensity', l: 'Seyrek dolgu yoğunluğu', u: '%', t: 'n', min: 0, max: 100, s: 1 },
-    { k: 'infillPattern', l: 'Dolgu deseni', t: 's', o: { grid: 'Izgara', gyroid: 'Gyroid', cubic: 'Kübik', triangles: 'Üçgen', rectilinear: 'Doğrusal', concentric: 'Eş merkezli', helix: 'Sarmal (deneysel)', golden: 'Altın açı (deneysel)', speed: 'Hızlı (deneysel)' } },
+    { k: 'infillPattern', l: 'Dolgu deseni', t: 's', o: { grid: 'Izgara', gyroid: 'Gyroid', cubic: 'Kübik', triangles: 'Üçgen', rectilinear: 'Doğrusal', concentric: 'Eş merkezli', helix: 'Sarmal (deneysel)', golden: 'Altın açı (deneysel)', speed: 'Hızlı (deneysel)', adaptivecubic: 'Uyarlanabilir kübik', lightning: 'Yıldırım (yalnızca üst yüzeyleri taşır)' }, tip: 'Uyarlanabilir kübik: yüzeylere ve duvarlara uzak derin bölgelerde seyrekleşir. Yıldırım: yalnızca üst yüzeylerin altına dal basar; en hızlı ve en az filament, ama içi boşa yakın — dayanım gerekmeyen süs ve figürler için.' },
+    { k: 'lightningAngle', l: 'Yıldırım dal açısı', u: '°', t: 'n', min: 10, max: 70, s: 5, tip: 'Dalların dikeyden en fazla ne kadar eğilerek duvara ulaşacağı. Büyük değer: daha kısa dallar, daha az filament.', adv: true },
+    { k: 'adaptiveCubicDepth', l: 'Uyarlanabilir kübik derinliği', u: 'mm', t: 'n', min: 1, max: 20, s: 0.5, tip: 'Yüzeylerden bu mesafeden derin bölgelerde dolgu yarıya, üç katından derinde dörtte bire iner.', adv: true },
     { k: 'helixStep', l: 'Sarmal dönüş açısı', u: '°/katman', t: 'n', min: 5, max: 90, s: 1, tip: 'Sarmal desende her katmanda çizgi yönünün dönme miktarı.', adv: true },
     { k: 'infillJoin', l: 'Dolgu çizgilerini birleştir', t: 'b', tip: 'Komşu dolgu çizgilerini bölge içinde kalan kısa bağlantılarla tek hatta birleştirir: daha az boş hareket ve geri çekme. Doğrusal, sarmal, altın açı ve hızlı desenlerde çalışır.' },
     { k: 'infillEvery', l: 'Dolguyu N katmanda bir bas', t: 'n', min: 1, max: 3, s: 1, tip: 'Seyrek dolgu N katmanda bir, N kat kalınlıkta basılır (Orca: infill combination). Malzeme aynı, hareket sayısı 1/N. Katman × N, nozul çapını geçmemeli.' },
@@ -275,6 +291,8 @@ export const PROCESS_SCHEMA = [
     { k: 'firstLayerInfillSpeed', l: 'İlk katman dolgu', u: 'mm/s', t: 'n', min: 5, max: 300, s: 5 },
     { k: 'slowLayers', l: 'Yavaş başlangıç katmanı', t: 'n', min: 0, max: 20, s: 1, tip: 'Hız bu kadar katman boyunca ilk katman hızından normale yükselir.', adv: true },
     { k: 'outerWallSpeed', l: 'Dış duvar', u: 'mm/s', t: 'n', min: 5, max: 600, s: 5 },
+    { k: 'smallPerimeterSpeed', l: 'Küçük çevreler', u: '%', t: 'n', min: 10, max: 100, s: 5, tip: 'Yarıçapı aşağıdaki değerden küçük delik ve kıvrımların duvarları, duvar hızının bu yüzdesiyle basılır (Orca: small perimeters). Küçük delikler daha yuvarlak ve temiz çıkar.' },
+    { k: 'smallPerimeterThreshold', l: 'Küçük çevre yarıçapı', u: 'mm', t: 'n', min: 0, max: 20, s: 0.5, tip: '0 = kapalı.' },
     { k: 'innerWallSpeed', l: 'İç duvar', u: 'mm/s', t: 'n', min: 5, max: 600, s: 5 },
     { k: 'sparseInfillSpeed', l: 'Seyrek dolgu', u: 'mm/s', t: 'n', min: 5, max: 600, s: 5 },
     { k: 'solidInfillSpeed', l: 'Katı dolgu', u: 'mm/s', t: 'n', min: 5, max: 600, s: 5 },
@@ -316,6 +334,7 @@ export const PROCESS_SCHEMA = [
   { g: 'Temizleme kulesi (CFS)', sec: 'Diğer', items: [
     { k: 'primeTower', l: 'Temizleme kulesi', t: 'b', tip: 'Birden fazla renk kullanıldığında her değişimde yeni rengi temizlemek için kule basılır.' },
     { k: 'flushTarget', l: 'Yıkama nereye', t: 's', o: { chute: 'Yazıcının atık kanalına (CFS)', tower: 'Temizleme kulesine' }, tip: 'CFS: yazıcı filamenti kesip eski rengi atık kanalından kendisi boşaltır; kulede yalnızca aşağıdaki küçük hacim basılır (küçük kule). "Temizleme kulesine" seçilirse yıkama hacimleri tablosundaki hacmin tamamı kulede basılır: kule büyür, baskı uzar.' },
+    { k: 'flushIntoInfill', l: 'Yıkamanın bir kısmını iç dolguya yap', t: 'b', tip: 'Renk değişiminden sonra yeni rengin parçalarında önce seyrek iç dolgu basılır; karışık renk görünmeyen dolguya gider ve o kadar hacim kuleden düşülür (Orca: flush into infill). Filament ve süre kazandırır.' },
     { k: 'purgeVolume', l: 'Kulede temizleme (değişim başına)', u: 'mm³', t: 'n', min: 0, max: 1000, s: 5, tip: "Atık kanalı seçiliyken her renk değişiminde kulede basılan küçük hacim (nozul basıncını ve rengi oturtur). Kuleye yıkamada ve tablo kapalıyken de kullanılır." },
     { k: 'towerWidth', l: 'Kule genişliği', u: 'mm', t: 'n', min: 10, max: 80, s: 1 },
     { k: 'towerSpeed', l: 'Kule hızı', u: 'mm/s', t: 'n', min: 10, max: 400, s: 10, adv: true },
@@ -333,7 +352,7 @@ export const PROCESS_SCHEMA = [
 ];
 
 export const PROCESS_BASE = {
-  layerHeight: 0.2, firstLayerHeight: 0.2, resolution: 0.0125, sliceMode: 'regular', smoothCurves: false, adaptiveLayers: false, adaptiveMinH: 0.08, adaptiveMaxH: 0.28, adaptiveQuality: 50,
+  layerHeight: 0.2, firstLayerHeight: 0.2, resolution: 0.0125, sliceMode: 'regular', smoothCurves: false, onlyOneWallTop: true, smallPerimeterSpeed: 50, smallPerimeterThreshold: 6.5, adaptiveLayers: false, adaptiveMinH: 0.08, adaptiveMaxH: 0.28, adaptiveQuality: 50,
   lineWidth: 0.42, firstLayerLineWidth: 0.5, outerWallLineWidth: 0.42, innerWallLineWidth: 0.45, topLineWidth: 0.42,
   solidLineWidth: 0.42, sparseLineWidth: 0.45, supportLineWidth: 0.42,
   seam: 'corner', seamGap: 10, scarfSeam: 'none', scarfLength: 10, scarfStartHeight: 0,
@@ -342,7 +361,7 @@ export const PROCESS_BASE = {
   wallLoops: 2, wallOrder: 'inner-outer', alternateLayers: 'none', gapFill: true, gapFillMin: 0.1, gapFillSpeed: 150,
   topLayers: 5, topThickness: 0.8, topPattern: 'monotonic', topAngleMode: 'auto', topAngle: 0, topFlow: 1.0,
   bottomLayers: 3, bottomThickness: 0, bottomPattern: 'monotonic',
-  infillDensity: 15, infillPattern: 'grid', helixStep: 15, infillJoin: false, infillEvery: 1, infillAngle: 45, solidAngle: 45, infillOverlap: 15, minSparseArea: 15,
+  infillDensity: 15, infillPattern: 'grid', lightningAngle: 40, adaptiveCubicDepth: 3, helixStep: 15, infillJoin: false, infillEvery: 1, infillAngle: 45, solidAngle: 45, infillOverlap: 15, minSparseArea: 15,
   bridgeDetect: true, bridgeFlow: 0.95, bridgeSpeed: 50, overhangSlowdown: true, overhangSpeedMid: 100, overhangSpeed: 40,
   firstLayerSpeed: 50, firstLayerInfillSpeed: 80, slowLayers: 0,
   outerWallSpeed: 200, innerWallSpeed: 300, sparseInfillSpeed: 270, solidInfillSpeed: 250, topSurfaceSpeed: 200,
@@ -351,7 +370,7 @@ export const PROCESS_BASE = {
   supportEnable: false, supportAngle: 30, supportBuildPlateOnly: false, supportPattern: 'rectilinear', supportSpacing: 2.5,
   supportTopZ: 0.2, supportBottomZ: 0.2, supportXY: 0.35, supportInterfaceLayers: 2, supportInterfaceSpacing: 0.5, supportSlot: 'auto',
   skirtLoops: 1, skirtDistance: 5, skirtHeight: 1, brimWidth: 0, brimGap: 0.1,
-  primeTower: true, flushTarget: 'chute', purgeVolume: 120, towerWidth: 35, towerSpeed: 150, towerAuto: true, towerX: 230, towerY: 230,
+  primeTower: true, flushTarget: 'tower', flushIntoInfill: true, purgeVolume: 120, towerWidth: 35, towerSpeed: 150, towerAuto: true, towerX: 230, towerY: 230,
   spiralVase: false, previewTravel: false, timeFactor: 1.08,
 };
 

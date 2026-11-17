@@ -1014,7 +1014,7 @@
         items.push({ li: li, Unext: q.U[li + 1] || [], comb: !!(S.avoidCrossingWalls && !(S.spiralVase && li >= S.spiralStart)), parts: parts.map(function (p) {
           var r = p.regions[li];
           if (!r || !r.outline.length) return null;
-          return { r: { outline: r.outline, walls: r.walls, solid: r.solid, top: r.top, sparse: r.sparse, bridge: r.bridge }, combo: comboFor(p, li, nL, S) };
+          return { r: { outline: r.outline, walls: r.walls, fill: r.fill, solid: r.solid, top: r.top, sparse: r.sparse, bridge: r.bridge, lightning: r.lightning, adapt: r.adapt }, combo: comboFor(p, li, nL, S) };
         }) });
       }
       tasks.push({ kind: 'C', S: S, layers: layers, items: items });
@@ -1085,6 +1085,132 @@
     });
   }
 
+  // ---------------------------------------------------------------- yıldırım ve uyarlanabilir kübik dolgu (katmanlar arası, sırayla)
+  // Bölgeyi ızgaraya boya (çift-tek, tarama çizgisi). G = { x0, y0, res, W, H }
+  function rasterize(paths, G, mask) {
+    mask = mask || new Uint8Array(G.W * G.H);
+    if (!paths || !paths.length) return mask;
+    var edges = [];
+    paths.forEach(function (p) { for (var i = 0; i < p.length; i++) { var a = p[i], c = p[(i + 1) % p.length]; edges.push(a.X / SCALE, a.Y / SCALE, c.X / SCALE, c.Y / SCALE); } });
+    var xs = [];
+    for (var j = 0; j < G.H; j++) {
+      var yc = G.y0 + (j + 0.5) * G.res; xs.length = 0;
+      for (var e = 0; e < edges.length; e += 4) { var y1 = edges[e + 1], y2 = edges[e + 3]; if ((y1 <= yc) !== (y2 <= yc)) xs.push(edges[e] + (yc - y1) / (y2 - y1) * (edges[e + 2] - edges[e])); }
+      xs.sort(function (a, b) { return a - b; });
+      for (var k = 0; k + 1 < xs.length; k += 2) {
+        var i0 = Math.max(0, Math.ceil((xs[k] - G.x0) / G.res - 0.5)), i1 = Math.min(G.W - 1, Math.floor((xs[k + 1] - G.x0) / G.res - 0.5));
+        for (var ii = i0; ii <= i1; ii++) mask[j * G.W + ii] = 1;
+      }
+    }
+    return mask;
+  }
+  function partGrid(part, res, maxCells) {
+    var b = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+    part.outline.forEach(function (o) { if (o.length) { var q = bboxOf(o); b.minX = Math.min(b.minX, q.minX); b.minY = Math.min(b.minY, q.minY); b.maxX = Math.max(b.maxX, q.maxX); b.maxY = Math.max(b.maxY, q.maxY); } });
+    if (!isFinite(b.minX)) return null;
+    var w = (b.maxX - b.minX) / SCALE + 2, hh = (b.maxY - b.minY) / SCALE + 2;
+    res = Math.max(res, Math.sqrt(w * hh / maxCells));
+    return { x0: b.minX / SCALE - 1, y0: b.minY / SCALE - 1, res: res, W: Math.ceil(w / res) + 1, H: Math.ceil(hh / res) + 1 };
+  }
+
+  // Yıldırım dolgu (Orca/Cura: lightning): yalnızca üst yüzeylerin altına, duvarlara doğru eğilerek inen dallar.
+  // Her katmanda dal düğümleri en yakın duvara doğru (uzaklık alanının eğimi boyunca) kayar; duvara ulaşan dal biter.
+  function computeLightning(part, layers, S) {
+    var nL = layers.length, W = S.W, d = Math.max(0.05, S.infillDensity / 100);
+    var sp = W.sparse / d;                       // düğüm aralığı ≈ dolgu çizgi aralığı
+    var G = partGrid(part, 0.4, 250000); if (!G) return;
+    var lean = Math.tan(Math.max(10, Math.min(70, num(S.lightningAngle, 40))) * Math.PI / 180);
+    var nodes = [];
+    for (var li = nL - 1; li >= 0; li--) {
+      var r = part.regions[li]; r.lightning = [];
+      if (!r.sparse || !r.sparse.length) { nodes = []; continue; }
+      var sparseM = rasterize(r.sparse, G), dist = edt2d(sparseM, G.W, G.H);
+      var at = function (x, y) { var i = Math.floor((x - G.x0) / G.res), j = Math.floor((y - G.y0) / G.res); return (i < 0 || j < 0 || i >= G.W || j >= G.H) ? -1 : j * G.W + i; };
+      // yeni düğümler: üstteki katmanın katı/üst yüzeyi bu katmanda seyrek dolguya oturuyorsa
+      var ra = li + 1 < nL ? part.regions[li + 1] : null;
+      if (ra) {
+        var need = intersect(union((ra.solid || []).concat(ra.top || [], ra.bridge || [])), r.sparse);
+        if (need.length) {
+          var needM = rasterize(need, G), stepC = Math.max(1, Math.round(sp / G.res)), occ = new Set();
+          nodes.forEach(function (n) { occ.add(Math.floor(n.x / sp) + ',' + Math.floor(n.y / sp)); });
+          for (var j = Math.floor(stepC / 2); j < G.H; j += stepC) for (var i = Math.floor(stepC / 2); i < G.W; i += stepC) {
+            var c = j * G.W + i; if (!needM[c]) continue;
+            var x = G.x0 + (i + 0.5) * G.res, y = G.y0 + (j + 0.5) * G.res, key = Math.floor(x / sp) + ',' + Math.floor(y / sp);
+            if (!occ.has(key)) { occ.add(key); nodes.push({ x: x, y: y }); }
+          }
+        }
+      }
+      var h = layers[li].h, step = h * lean, keep = [], merged = new Set();
+      for (var k = 0; k < nodes.length; k++) {
+        var nd = nodes[k], c0 = at(nd.x, nd.y);
+        if (c0 < 0 || !sparseM[c0]) continue;          // katı bölgeye ya da duvara oturdu: dal bitti
+        var dv = Math.sqrt(dist[c0]) * G.res;
+        if (dv <= W.sparse) { r.lightning.push([nd.x, nd.y, nd.x, nd.y, 0, 0, 'pt']); continue; } // duvara ulaştı
+        // en yakın duvara doğru: uzaklık alanının azalan yönü
+        var ci = c0 % G.W, cj = (c0 - ci) / G.W, gx = 0, gy = 0;
+        if (ci > 0 && ci < G.W - 1) gx = Math.sqrt(dist[c0 + 1]) - Math.sqrt(dist[c0 - 1]);
+        if (cj > 0 && cj < G.H - 1) gy = Math.sqrt(dist[c0 + G.W]) - Math.sqrt(dist[c0 - G.W]);
+        var gl = Math.hypot(gx, gy) || 1, ux = -gx / gl, uy = -gy / gl;
+        var nx = nd.x + ux * step, ny = nd.y + uy * step;
+        // basılan parça: düğümden duvar yönüne en az 1 mm (katmanlar üst üste eğik bir dal oluşturur)
+        var segL = Math.max(1.0, step);
+        r.lightning.push([nd.x, nd.y, nd.x + ux * segL, nd.y + uy * segL, 0, 0]);
+        var mk = Math.round(nx / (sp * 0.5)) + ',' + Math.round(ny / (sp * 0.5));
+        if (merged.has(mk)) continue;                    // birbirine yaklaşan dallar birleşir
+        merged.add(mk); keep.push({ x: nx, y: ny });
+      }
+      nodes = keep;
+      r.lightning = r.lightning.filter(function (l) { return l[6] !== 'pt'; });
+    }
+  }
+
+  // Uyarlanabilir kübik (Orca: adaptive cubic): üst/alt yüzeye ve duvara uzak derin bölgelerde çizgiler seyrekleşir.
+  // Seviye 0: normal, 1: her 2 çizgiden 1'i, 2: her 4 çizgiden 1'i. Izgara her katman için seviye tutar.
+  function computeAdaptive(part, layers, S) {
+    var nL = layers.length, G = partGrid(part, 1.0, 90000); if (!G) return;
+    var n = G.W * G.H, masks = [];
+    for (var li = 0; li < nL; li++) masks.push(rasterize(part.regions[li].sparse || [], G));
+    var up = new Float32Array(n), down = new Float32Array(n), downs = [];
+    for (li = 0; li < nL; li++) { var m = masks[li], hh = layers[li].h; for (var c = 0; c < n; c++) down[c] = m[c] ? down[c] + hh : 0; downs.push(down.slice()); }
+    var L1 = num(S.adaptiveCubicDepth, 3), L2 = L1 * 3;
+    for (li = nL - 1; li >= 0; li--) {
+      var m2 = masks[li], hh2 = layers[li].h;
+      var dist = edt2d(m2, G.W, G.H), lv = new Uint8Array(n);
+      for (c = 0; c < n; c++) {
+        up[c] = m2[c] ? up[c] + hh2 : 0;
+        if (!m2[c]) continue;
+        var depth = Math.min(up[c], downs[li][c], Math.sqrt(dist[c]) * G.res);
+        lv[c] = depth >= L2 ? 2 : depth >= L1 ? 1 : 0;
+      }
+      part.regions[li].adapt = { x0: G.x0, y0: G.y0, res: G.res, W: G.W, H: G.H, lv: lv };
+    }
+  }
+  // kübik çizgileri derinliğe göre seyrelt: çizgi sırası (satır no) seviyeye göre atlanır, çizgi gerektiği yerde bölünür
+  function thinByLevel(lines, sp, A, ad) {
+    if (!ad) return lines;
+    var out = [], ang = A * Math.PI / 180;
+    lines.forEach(function (l) {
+      var row = Math.round(l[4] / (sp * SCALE));
+      var keepAt = function (x, y) {
+        var i = Math.floor((x - ad.x0) / ad.res), j = Math.floor((y - ad.y0) / ad.res);
+        var lv = (i < 0 || j < 0 || i >= ad.W || j >= ad.H) ? 0 : ad.lv[j * ad.W + i];
+        return lv === 0 || row % (1 << lv) === 0;
+      };
+      var L = Math.hypot(l[2] - l[0], l[3] - l[1]), nS = Math.max(1, Math.ceil(L / 1.0)), start = null;
+      for (var k = 0; k <= nS; k++) {
+        var t = k / nS, x = l[0] + (l[2] - l[0]) * t, y = l[1] + (l[3] - l[1]) * t, ok = keepAt(x, y);
+        if (ok && start === null) start = [x, y];
+        if ((!ok || k === nS) && start !== null) {
+          var ex = ok ? x : l[0] + (l[2] - l[0]) * (k - 1) / nS, ey = ok ? y : l[1] + (l[3] - l[1]) * (k - 1) / nS;
+          if (Math.hypot(ex - start[0], ey - start[1]) > 0.8) out.push([start[0], start[1], ex, ey, l[4], l[5]]);
+          start = null;
+        }
+      }
+    });
+    void ang;
+    return out;
+  }
+
   // ---------------------------------------------------------------- katman planı (saf: paralel hesaplanabilir)
   // Üst yüzey yönü (otomatik): en az çizgi = en uzun çizgiler = en az çizgi ucu
   function longestAngle(region) {
@@ -1118,7 +1244,7 @@
     return best;
   }
   // Seyrek dolgu çizgileri (desene göre). Gyroid ve eş merkezli için null: onlar basılırken üretilir.
-  function sparseLines(region, hMul, li, z, S, W, first) {
+  function sparseLines(region, hMul, li, z, S, W, first, adapt) {
     var wsp = first ? W.first : W.sparse, d = S.infillDensity / 100, A = S.infillAngle, pat = S.infillPattern;
     var gi = Math.floor(li / (hMul || 1));
     var single = null;
@@ -1129,13 +1255,15 @@
     if (pat === 'gyroid' || pat === 'concentric') return null;
     if (pat === 'grid') { var s2 = 2 * wsp / d; return lineFill(region, s2, A).concat(lineFill(region, s2, A + 90)); }
     if (pat === 'triangles') { var s3 = 3 * wsp / d; return lineFill(region, s3, A).concat(lineFill(region, s3, A + 60), lineFill(region, s3, A - 60)); }
-    if (pat === 'cubic') {
+    if (pat === 'cubic' || pat === 'adaptivecubic') {
       // 3 yönlü, z ile kayan çizgiler: kübik dolguya yakın bir yapı
       var s4 = 3 * wsp / d, shift = (z % s4) / Math.SQRT2;
       var mk = function (a, sh) { return lineFill(region.map(function (pth) { return pth.map(function (q) { return { X: q.X + Math.round(sh * SCALE), Y: q.Y }; }); }), s4, a)
         .map(function (l) { return [l[0] - sh, l[1], l[2] - sh, l[3], l[4], l[5]]; }); };
+      if (pat === 'adaptivecubic' && adapt) return thinByLevel(mk(A, shift), s4, A, adapt).concat(thinByLevel(mk(A + 60, -shift), s4, A + 60, adapt), thinByLevel(mk(A - 60, shift * 0.5), s4, A - 60, adapt));
       return mk(A, shift).concat(mk(A + 60, -shift), mk(A - 60, shift * 0.5));
     }
+    if (pat === 'lightning') return null; // planda, katmanlar arası hesaplanmış dallardan
     return lineFill(region, wsp / d, gi % 2 ? A : A + 90); // doğrusal
   }
   // Bir parçanın bir katmandaki planı: adalar, ada başına duvar kümeleri, dolgu bölgeleri ve hazır dolgu çizgileri.
@@ -1148,6 +1276,17 @@
       var P = { wallSets: r.walls.map(function (wp) { return intersect(wp, big); }) };
       if (spiral) return P;
       var solid = intersect(r.solid, big), top = intersect(r.top, big), sparse = intersect(r.sparse, big), bridge = intersect(r.bridge, big);
+      // Üst yüzeyde tek duvar (Orca: only one wall on top): adanın dolgusu tamamen üst yüzeyse iç duvarlar kalkar,
+      // o alan da üst yüzey çizgileriyle dolar — daha düzgün ve tek parça görünen üst yüzey, daha az kafa hareketi
+      if (S.onlyOneWallTop && !first && P.wallSets.length > 1 && top.length) {
+        var fillHere = intersect(r.fill, big), fa = Math.abs(areaOf(fillHere));
+        if (fa > 0 && Math.abs(areaOf(intersect(top, fillHere))) >= fa * 0.95) {
+          var wo1 = W.outer, inside = opening(offset(isl, -wo1 + S.infillOverlap / 100 * W.top, false), 0.1);
+          P.wallSets = [P.wallSets[0]];
+          top = inside; solid = inside; sparse = []; bridge = intersect(bridge, inside);
+          P.oneWall = isl; // bu adadaki eski boşluk dolgusu çizgileri basılmasın
+        }
+      }
       var topOnly = intersect(top, solid);
       var solidNoTop = difference(solid, topOnly);
       var ang = (li % 2 === 0) ? S.solidAngle : S.solidAngle + 90;
@@ -1180,7 +1319,15 @@
         } else if (sparse.length) P.sparse.push({ region: sparse, hMul: 0 });
       }
       var joinable = S.infillJoin && ['helix', 'golden', 'speed', 'rectilinear'].indexOf(S.infillPattern) >= 0;
-      P.sparse.forEach(function (it) { it.lines = sparseLines(it.region, it.hMul || 1, li, z, S, W, first); if (joinable) it.reg = offset(it.region, 0.05, false); });
+      P.sparse.forEach(function (it) {
+        it.lines = sparseLines(it.region, it.hMul || 1, li, z, S, W, first, r.adapt);
+        if (S.infillPattern === 'lightning') {
+          // bu adanın seyrek bölgesindeki yıldırım dalları
+          var pp = it.region.map(function (q) { return q.map(function (v) { return [v.X / SCALE, v.Y / SCALE]; }); });
+          it.lines = (r.lightning || []).filter(function (l) { return pip(pp, (l[0] + l[2]) / 2, (l[1] + l[3]) / 2); });
+        }
+        if (joinable) it.reg = offset(it.region, 0.05, false);
+      });
       return P;
     });
   }
@@ -1618,6 +1765,22 @@
     if (num(fil().pressureAdvance, 0) > 0) out.push('SET_PRESSURE_ADVANCE ADVANCE=' + fil().pressureAdvance);
     setFan(0, 0);
 
+    // katman planı: paralel dilimlemede önceden hazırdır; yoksa burada bir kez hesaplanır (en kısa katman süresi tekrarında yeniden kullanılır)
+    function planOf(p) {
+      p.plans = p.plans || [];
+      return p.plans[li] || (p.plans[li] = planPart(p.regions[li], li, nL, S, h, Ly.z, spiral, comboFor(p, li, nL, S), job.U[li + 1] || []));
+    }
+    // bu katmanda bir yuvanın parçalarının seyrek dolgu hacmi (yıkamanın dolguya yapılabilecek kısmı)
+    function sparseVolume(slot) {
+      var v = 0, area = (W.sparse - h * (1 - Math.PI / 4)) * h;
+      (bySlot[slot] || []).forEach(function (p) {
+        planOf(p).forEach(function (P) { (P.sparse || []).forEach(function (it) {
+          if (!it.lines) return;
+          it.lines.forEach(function (l) { v += Math.hypot(l[2] - l[0], l[3] - l[1]) * area * (it.hMul || 1); });
+        }); });
+      });
+      return v;
+    }
     function toolChange(to, li) {
       if (to === extruder) return;
       var from = extruder;
@@ -1647,7 +1810,13 @@
       stats.time += S.toolChangeTime;
       applyLayerFans(li);
       // CFS atık kanalı: asıl yıkamayı yazıcı yapar, kulede yalnızca küçük temizleme
-      towerLayer(li, S.flushTarget === 'tower' ? flushVol : S.purgeVolume * num(fils[to].purgeMultiplier, 1));
+      var towerVol = S.flushTarget === 'tower' ? flushVol : S.purgeVolume * num(fils[to].purgeMultiplier, 1);
+      // yıkamanın bir kısmı yeni rengin parçalarının iç dolgusuna (önce dolgu basılır, karışık renk içeride kalır)
+      if (S.flushIntoInfill && S.flushTarget === 'tower' && !spiral) {
+        var take = Math.min(sparseVolume(to), towerVol);
+        if (take > 1) { towerVol -= take; flushFirstSlot = to; stats.flushInfill = (stats.flushInfill || 0) + take; out.push('; flush into infill = ' + Math.round(take) + ' mm3'); }
+      }
+      towerLayer(li, towerVol);
       return true;
     }
 
@@ -1733,6 +1902,7 @@
 
       function emitLayer() {
         var changed = false;
+        flushFirstSlot = -1;
         var sk = job.skirt;
         if (sk && li < sk.layers && (sk.rings.length || (first && sk.brim.length))) {
           var wsk = first ? W.first : W.outer;
@@ -1751,9 +1921,7 @@
         var r = p.regions[li];
         partFlow = p.flowMul || 1; // akış kalibrasyonu: parça başına akış çarpanı
         // katman planı: paralel dilimlemede önceden hazırdır; yoksa burada bir kez hesaplanır (en kısa katman süresi tekrarında yeniden kullanılır)
-        p.plans = p.plans || [];
-        var plan = p.plans[li];
-        if (!plan) plan = p.plans[li] = planPart(r, li, nL, S, h, Ly.z, spiral, comboFor(p, li, nL, S), job.U[li + 1] || []);
+        var plan = planOf(p);
         if (S.labelObjects) out.push('EXCLUDE_OBJECT_START NAME=' + p.label);
         plan.forEach(function (P) {
           var wallSets = P.wallSets;
@@ -1766,10 +1934,11 @@
             if ((S.wallOrder === 'outer-inner') !== revOrder) { for (var a = 0; a < wallSets.length; a++) emitWall(wallSets[a], a === 0, wo, wi); }
             else { for (var b = wallSets.length - 1; b >= 0; b--) emitWall(wallSets[b], b === 0, wo, wi); }
           };
-          var fillFirst = odd && altMode === 'order';
+          var altOrder = odd && altMode === 'order';
+          var fillFirst = altOrder || flushFirstSlot === p.slot; // renk değişiminden sonra yıkama dolguya
           if (!fillFirst) emitWalls(false);
           emitFills();
-          if (fillFirst) emitWalls(true);
+          if (fillFirst) emitWalls(altOrder);
           wallRev = false;
           function emitFills() {
             var ws = first ? W.first : W.solid;
@@ -1795,9 +1964,15 @@
             P.sparse.forEach(function (it) { out.push(';TYPE:Sparse infill'); emitSparse(it.region, it.hMul || undefined, it.lines, it.reg); });
           }
         });
-        if (r.gaps && r.gaps.length) {
+        var gaps = r.gaps;
+        var ow = plan.filter(function (P) { return P.oneWall; });
+        if (ow.length && gaps && gaps.length) {
+          var owp = ow.map(function (P) { return P.oneWall.map(function (pp) { return pp.map(function (q) { return [q.X / SCALE, q.Y / SCALE]; }); }); });
+          gaps = gaps.filter(function (g) { return !owp.some(function (pp) { return pip(pp, g[0][0], g[0][1]); }); });
+        }
+        if (gaps && gaps.length) {
           out.push(';TYPE:Gap infill');
-          orderPolylines(r.gaps, [pos.x, pos.y]).forEach(function (g) { extrudeVarPath(g, spd(first ? S.firstLayerSpeed : S.gapFillSpeed), h, T.GAP, first ? S.accelFirst : S.accelInnerWall); });
+          orderPolylines(gaps, [pos.x, pos.y]).forEach(function (g) { extrudeVarPath(g, spd(first ? S.firstLayerSpeed : S.gapFillSpeed), h, T.GAP, first ? S.accelFirst : S.accelInnerWall); });
         }
         partFlow = 1;
         if (S.labelObjects) out.push('EXCLUDE_OBJECT_END NAME=' + p.label);
@@ -1842,14 +2017,15 @@
         outp = outp.concat(walk(0, pts.length - 1, function (sv) { var r = Math.min(1, sv / Ls); return [zTop, (1 - f0) * (1 - r)]; }));
         return outp;
       }
-      var wallRev = false;
+      var wallRev = false, flushFirstSlot = -1;
       function emitWall(paths, isOuter, wo, wi) {
         if (!paths.length) return;
         out.push(isOuter ? ';TYPE:Outer wall' : ';TYPE:Inner wall');
         var done = new Uint8Array(paths.length);
         var w = isOuter ? wo : wi, type = isOuter ? T.OUTER : T.INNER;
         var acc = first ? S.accelFirst : (isOuter ? S.accelOuterWall : S.accelInnerWall);
-        var baseSp = spd(isOuter ? S.outerWallSpeed : S.innerWallSpeed);
+        var wallSp = spd(isOuter ? S.outerWallSpeed : S.innerWallSpeed), baseSp = wallSp;
+        var smallLen = 2 * Math.PI * num(S.smallPerimeterThreshold, 0) * SCALE;
         for (var n2 = 0; n2 < paths.length; n2++) {
           var b = -1, bd = Infinity;
           for (var k = 0; k < paths.length; k++) {
@@ -1861,6 +2037,13 @@
           done[b] = 1;
           var seam = S.seam === 'aligned' ? 'nearest' : S.seam;
           var near = (S.seam === 'aligned' || S.seam === 'corner') ? lastSeam : [pos.x, pos.y];
+          // küçük çevreler (delik, ince kıvrım): yavaş bas, köşeler ve daireler düzgün çıksın (Orca: small perimeters)
+          baseSp = wallSp;
+          if (smallLen > 0 && !first) {
+            var per = 0, pb = paths[b];
+            for (var q2 = 0; q2 < pb.length; q2++) { var qa = pb[q2], qb = pb[(q2 + 1) % pb.length]; per += Math.hypot(qb.X - qa.X, qb.Y - qa.Y); }
+            if (per <= smallLen) baseSp = Math.max(S.minSpeedFloor || 20, wallSp * num(S.smallPerimeterSpeed, 100) / 100);
+          }
           var pts = loopFrom(paths[b], seam, near, bedCx);
           if (wallRev) pts.reverse(); // kapalı döngü: başlangıç (dikiş) noktası aynı kalır
           if (isOuter) lastSeam = pts[0];
@@ -1923,8 +2106,8 @@
         var ac = first ? S.accelFirst : S.accelInfill;
         var pat = S.infillPattern;
         var ls = pre !== undefined ? pre : sparseLines(region, hMul || 1, li, Ly.z, S, W, first);
-        if (pat === 'helix' || pat === 'golden' || pat === 'speed') {
-          var polys = S.infillJoin ? joinInRegion(ls, region, (wsp / d) * 2.5, preReg) : orderLines(ls, [pos.x, pos.y]);
+        if (pat === 'helix' || pat === 'golden' || pat === 'speed' || pat === 'lightning') {
+          var polys = S.infillJoin && pat !== 'lightning' ? joinInRegion(ls || [], region, (wsp / d) * 2.5, preReg) : orderLines(ls || [], [pos.x, pos.y]);
           polys.forEach(function (p) { extrudePath(p, sp, wsp, hh, T.SPARSE, ac, 1); });
           return;
         }
@@ -1981,7 +2164,7 @@
     // Başlık bloğu: Moonraker/Fluidd dilimleyiciyi "; generated by AD SÜRÜM on TARİH at SAAT" satırından tanır
     var now = new Date(), p2 = function (n) { return (n < 10 ? '0' : '') + n; };
     header.push('; HEADER_BLOCK_START');
-    header.push('; generated by K1MaxDilimleyici 2.22 on ' + now.getFullYear() + '-' + p2(now.getMonth() + 1) + '-' + p2(now.getDate()) +
+    header.push('; generated by K1MaxDilimleyici 2.23 on ' + now.getFullYear() + '-' + p2(now.getMonth() + 1) + '-' + p2(now.getDate()) +
       ' at ' + p2(now.getHours()) + ':' + p2(now.getMinutes()) + ':' + p2(now.getSeconds()));
     header.push('; total layer number: ' + nL);
     header.push('; HEADER_BLOCK_END', '');
@@ -2093,6 +2276,11 @@
     }
     // bölgeler: eşzamanlı sürüm burada hesaplar, paralel sürüm (sliceParallel) yardımcı iş parçacıklarına dağıtır
     yield { kind: 'regions', parts: parts, layers: layers, S: S, U: U };
+    // katmanlar arası dolgu hesapları (sırayla): yıldırım dalları, uyarlanabilir kübik seviyeleri
+    if (S.infillDensity > 0 && !S.spiralVase) {
+      if (S.infillPattern === 'lightning') { progress(0.6, 'Yıldırım dolgu dalları'); parts.forEach(function (p) { computeLightning(p, layers, S); }); }
+      if (S.infillPattern === 'adaptivecubic') { progress(0.6, 'Uyarlanabilir kübik dolgu'); parts.forEach(function (p) { computeAdaptive(p, layers, S); }); }
+    }
     parts.forEach(function (p, i) {
       var bb = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
       p.outline.forEach(function (o) { if (o.length) { var b = bboxOf(o); bb.minX = Math.min(bb.minX, b.minX / SCALE); bb.minY = Math.min(bb.minY, b.minY / SCALE); bb.maxX = Math.max(bb.maxX, b.maxX / SCALE); bb.maxY = Math.max(bb.maxY, b.maxY / SCALE); } });

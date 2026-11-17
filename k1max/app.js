@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
-import { CATEGORIES, SLOT_COLORS, SLOT_COUNT, OLD_START_GCODE, START_GCODE } from './presets.js';
+import { CATEGORIES, SLOT_COLORS, SLOT_COUNT, OLD_START_GCODE, START_GCODE, START_GCODE_V2, START_GCODE_NO_CFS, OLD_CHANGE_GCODE, CHANGE_GCODE } from './presets.js';
 import { load3MF } from './threemf.js';
 import { writeProject, readProject } from './project3mf.js';
 import { repairMesh, repairSummary } from './meshrepair.js';
@@ -39,7 +39,7 @@ function toBlob(text, id) {
 }
 
 // ================================================================= durum ve profiller
-const APP_VERSION = '2.22';
+const APP_VERSION = '2.23';
 const DEVICE_KEYS = ['hostIp', 'hostPort', 'apiKey', 'startLineInfo'];
 const FAST_PRESET = 'Hızlı baskı (uyarlanabilir 0.10–0.28)';
 let state = null;
@@ -85,13 +85,25 @@ function loadState() {
   while (s.slots.length < SLOT_COUNT) s.slots.push({ name: 'Genel PLA', color: SLOT_COLORS[s.slots.length], values: null });
   s.slots.forEach(sl => fix('filament', sl));
   // eski sürümlerden kalan ayarları düzelt (bir kez)
+  const noCfs = /CFS yok/.test(s.printer.name);
   if ((s.migr || 0) < 1) {
-    if (s.printer.values.startGcode === OLD_START_GCODE) s.printer.values.startGcode = START_GCODE; // gereksiz nozul ısıtma döngüsü
+    if (s.printer.values.startGcode === OLD_START_GCODE) s.printer.values.startGcode = noCfs ? START_GCODE_NO_CFS : START_GCODE; // gereksiz nozul ısıtma döngüsü
     s.slots.forEach(sl => { // yan fan hiç çalışmıyordu: sistem profillerinde yeni varsayılan
       const pre = CATEGORIES.filament.presets[sl.name];
       if (pre && pre.auxFan > 0 && !(sl.values.auxFan > 0)) sl.values.auxFan = pre.auxFan;
     });
     s.migr = 1;
+  }
+  if (s.migr < 2) { // Creality'nin resmi CFS G-code'u (ilk yuva seçimi, kesme konumu) ve kulede yıkama
+    const pv = s.printer.values;
+    if (!noCfs && pv.startGcode === START_GCODE_V2) pv.startGcode = START_GCODE;
+    if (pv.changeFilamentGcode === OLD_CHANGE_GCODE) { pv.changeFilamentGcode = CHANGE_GCODE; if (pv.toolChangeLift === 2) pv.toolChangeLift = 0.4; }
+    if (s.process.values.flushTarget === 'chute') s.process.values.flushTarget = 'tower';
+    s.migr = 2;
+  }
+  if (s.migr < 3) { // K1 Max resmi profilinde nesne etiketleri açık (iptal-et ve KAMP çizgisi için)
+    if (s.printer.values.labelObjects === false) s.printer.values.labelObjects = true;
+    s.migr = 3;
   }
   if (!s.flush || !Array.isArray(s.flush.m)) s.flush = { on: true, auto: true, mult: 1, m: null };
   if (s.flush.auto || !s.flush.m) s.flush.m = autoFlush(s.slots);
