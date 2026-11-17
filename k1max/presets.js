@@ -62,6 +62,8 @@ export const PRINTER_SCHEMA = [
     { k: 'retractSpeed', l: 'Geri çekme hızı', u: 'mm/s', t: 'n', min: 5, max: 150, s: 1 },
     { k: 'deretractSpeed', l: 'Geri itme hızı', u: 'mm/s', t: 'n', min: 5, max: 150, s: 1 },
     { k: 'zHop', l: 'Z kaldırma', u: 'mm', t: 'n', min: 0, max: 3, s: 0.05 },
+    { k: 'zHopType', l: 'Z kaldırma biçimi', t: 's', o: { normal: 'Dikey', slope: 'Eğimli (ilerlerken yüksel)' }, tip: 'Eğimli: nozul yerinde dikey kalkmaz, boş harekete başlarken yavaşça yükselir (Orca: Slope). Kalkış anında bırakılan ip ve damla azalır.' },
+    { k: 'travelSlope', l: 'Kalkış eğimi', u: '°', t: 'n', min: 1, max: 60, s: 1, tip: 'Eğimli Z kaldırmada yükselme açısı (Orca varsayılanı 3°).', adv: true },
     { k: 'retractMinTravel', l: 'Min. hareket mesafesi', u: 'mm', t: 'n', min: 0, max: 20, s: 0.1, tip: 'Bundan kısa boş hareketlerde geri çekme yapılmaz.' },
     { k: 'retractOnLayerChange', l: 'Katman değişiminde geri çek', t: 'b' },
     { k: 'avoidCrossingWalls', l: 'Duvarları geçmeden dolaş', t: 'b', tip: 'Boş hareketler parçanın içinden dolaşır; dış duvarın üzerinden geçip iz bırakmaz.' },
@@ -103,7 +105,7 @@ export const PRINTER_SCHEMA = [
 export const PRINTER_BASE = {
   bedX: 300, bedY: 300, bedZ: 300, nozzleDiameter: 0.4,
   machineMaxAccel: 20000, machineMaxSpeed: 800, squareCornerVelocity: 5, accelToDecel: 50, zSpeed: 15,
-  retractLength: 0.8, retractSpeed: 40, deretractSpeed: 40, zHop: 0.2, retractMinTravel: 1.5, retractOnLayerChange: true, avoidCrossingWalls: true, retractOnlyCrossing: true, combMaxDetour: 2, wipe: true, wipeDistance: 1.5, wipeRetractPart: 70,
+  retractLength: 0.8, retractSpeed: 40, deretractSpeed: 40, zHop: 0.2, retractMinTravel: 1.5, retractOnLayerChange: true, zHopType: 'slope', travelSlope: 3, avoidCrossingWalls: true, retractOnlyCrossing: true, combMaxDetour: 2, wipe: true, wipeDistance: 1.5, wipeRetractPart: 70,
   toolChangeLift: 0.4, toolChangeTime: 45, changeFilamentGcode: CHANGE_GCODE,
   startGcode: START_GCODE, endGcode: END_GCODE, layerChangeGcode: '',
   labelObjects: true, startLineMode: 'auto', startLineManual: '', startLineInfo: '', thumbnail: true, thumbnailSize: 300,
@@ -124,6 +126,8 @@ export const FILAMENT_SCHEMA = [
     { k: 'cost', l: 'Fiyat', u: '₺/kg', t: 'n', min: 0, max: 100000, s: 10 },
     { k: 'flowRatio', l: 'Akış oranı', t: 'n', min: 0.7, max: 1.3, s: 0.005, tip: 'Kalibre edin: üst yüzeyde boşluk varsa artırın, taşma varsa azaltın.' },
     { k: 'pressureAdvance', l: 'Pressure advance', t: 'n', min: 0, max: 0.5, s: 0.002, tip: '0 = yazıcıdaki ayar kullanılır.' },
+    { k: 'adaptivePA', l: 'Hıza göre pressure advance', t: 'b', tip: 'Akış (mm³/s) ve ivme arttıkça etkin PA genelde düşer. Açıkken her hareket için aşağıdaki tablodan PA hesaplanır ve değiştiğinde yazıcıya gönderilir (Orca: adaptive pressure advance). Tablo için PA kalibrasyonunu farklı hız ve ivmelerde tekrarlayın.' },
+    { k: 'paModel', l: 'PA tablosu (PA, akış mm³/s, ivme)', t: 'g', tip: 'Her satırda bir ölçüm: PA, akış, ivme. Örnek:\n0.045, 5, 5000\n0.038, 15, 5000\n0.040, 5, 12000\n0.033, 15, 12000' },
     { k: 'maxVolumetric', l: 'Maks. hacimsel akış', u: 'mm³/s', t: 'n', min: 0.5, max: 60, s: 0.5, tip: 'Hız bu akışa göre otomatik sınırlanır.' },
   ]},
   { g: 'Sıcaklık', items: [
@@ -165,7 +169,7 @@ const FIL_BASE = {
   fanOffLayers: 1, fanFullLayer: 3, fanMin: 100, fanMax: 100, bridgeFan: 100, overhangFan: 100, auxFan: 0, chamberFan: 0,
   minLayerTime: 6, minSpeed: 20,
   retractLength: null, retractSpeed: null, deretractSpeed: null, zHop: null,
-  purgeMultiplier: 1, startGcode: '', endGcode: '',
+  purgeMultiplier: 1, adaptivePA: false, paModel: '', startGcode: '', endGcode: '',
 };
 export const FILAMENT_BASE = FIL_BASE;
 
@@ -202,6 +206,9 @@ export const PROCESS_SCHEMA = [
     { k: 'firstLayerHeight', l: 'İlk katman yüksekliği', u: 'mm', t: 'n', min: 0.1, max: 0.35, s: 0.01 },
   ]},
   { g: 'Çözünürlük', sec: 'Kalite', items: [
+    { k: 'fuzzySkin', l: 'Bulanık yüzey', t: 's', o: { none: 'Kapalı', outer: 'Dış duvarlar', all: 'Tüm duvarlar' }, tip: 'Dış duvar noktaları rastgele kaydırılır: tutması kolay, pürüzlü ve mat bir doku (Orca: fuzzy skin). Katman çizgilerini ve küçük kusurları gizler.' },
+    { k: 'fuzzyThickness', l: 'Bulanıklık kalınlığı', u: 'mm', t: 'n', min: 0.05, max: 1, s: 0.05 },
+    { k: 'fuzzyPointDist', l: 'Bulanıklık nokta aralığı', u: 'mm', t: 'n', min: 0.1, max: 5, s: 0.1 },
     { k: 'thinWalls', l: 'İnce detaylarda değişken çizgi (Arachne benzeri)', t: 'b', tip: 'Duvar halkasının iki kenarının üst üste bineceği kadar dar yerlerde (ince çizgiler, yazılar, kar tanesi kolları) halka yerine ortasından geçen tek, değişken kalınlıklı çizgi basılır. Fazla malzemeyi ve pütürleri önler, ince detaylardaki boşlukları kapatır.' },
     { k: 'onlyOneWallTop', l: 'Üst yüzeyde tek duvar', t: 'b', tip: 'Tamamı üst yüzey olan katmanlarda yalnızca dış duvar basılır, içi üst yüzey çizgileriyle dolar (Orca: only one wall on top). Üst yüzey daha düzgün ve tek parça görünür, süre kısalır.' },
     { k: 'smoothCurves', l: 'Köşeli kavisleri yumuşat', t: 'b', tip: 'Düşük çözünürlükte çizilmiş modellerde kavisler uzun düz parçalardan oluşur ve baskıda köşeli görünür. Açıkken hafif açılı (35°\'den az) köşeler, köşe noktalarından geçen düzgün bir eğriyle değiştirilir; keskin köşeler aynen kalır. Ölçü hassasiyeti gereken teknik parçalarda kapalı tutun.' },
@@ -316,6 +323,10 @@ export const PROCESS_SCHEMA = [
     { k: 'supportEnable', l: 'Destek oluştur', t: 'b' },
     { k: 'supportAngle', l: 'Eşik açısı', u: '°', t: 'n', min: 0, max: 90, s: 1, tip: 'Yataya göre bu açıdan daha yatık çıkıntılar desteklenir. 30–45 arası tipik.' },
     { k: 'supportBuildPlateOnly', l: 'Yalnızca tabladan', t: 'b', tip: 'Açıksa destek modelin üzerine oturmaz.' },
+    { k: 'supportType', l: 'Destek türü', t: 's', o: { normal: 'Normal (dik)', tree: 'Ağaç' }, tip: 'Ağaç: çıkıntıların altından başlayan dallar birleşip modelden kaçarak tablaya iner (Orca: tree support). Çok daha az malzeme, kolay sökülür, modelde daha az iz bırakır.' },
+    { k: 'treeBranchAngle', l: 'Ağaç dal açısı', u: '°', t: 'n', min: 10, max: 80, s: 5, adv: true },
+    { k: 'treeTipDiameter', l: 'Ağaç uç çapı', u: 'mm', t: 'n', min: 0.8, max: 5, s: 0.1, adv: true },
+    { k: 'treeTipSpacing', l: 'Ağaç uç aralığı', u: 'mm', t: 'n', min: 1.5, max: 10, s: 0.5, adv: true },
     { k: 'supportPattern', l: 'Desen', t: 's', o: { rectilinear: 'Doğrusal', grid: 'Izgara' } },
     { k: 'supportSpacing', l: 'Çizgi aralığı', u: 'mm', t: 'n', min: 0.5, max: 10, s: 0.1 },
     { k: 'supportTopZ', l: 'Üst Z mesafesi', u: 'mm', t: 'n', min: 0, max: 1, s: 0.02, tip: 'Destek ile model arasındaki dikey boşluk; sökmeyi kolaylaştırır.' },
@@ -353,7 +364,7 @@ export const PROCESS_SCHEMA = [
 ];
 
 export const PROCESS_BASE = {
-  layerHeight: 0.2, firstLayerHeight: 0.2, resolution: 0.0125, sliceMode: 'regular', smoothCurves: false, thinWalls: true, onlyOneWallTop: true, smallPerimeterSpeed: 50, smallPerimeterThreshold: 6.5, adaptiveLayers: false, adaptiveMinH: 0.08, adaptiveMaxH: 0.28, adaptiveQuality: 50,
+  layerHeight: 0.2, firstLayerHeight: 0.2, resolution: 0.0125, sliceMode: 'regular', smoothCurves: false, fuzzySkin: 'none', fuzzyThickness: 0.3, fuzzyPointDist: 0.8, thinWalls: true, onlyOneWallTop: true, smallPerimeterSpeed: 50, smallPerimeterThreshold: 6.5, adaptiveLayers: false, adaptiveMinH: 0.08, adaptiveMaxH: 0.28, adaptiveQuality: 50,
   lineWidth: 0.42, firstLayerLineWidth: 0.5, outerWallLineWidth: 0.42, innerWallLineWidth: 0.45, topLineWidth: 0.42,
   solidLineWidth: 0.42, sparseLineWidth: 0.45, supportLineWidth: 0.42,
   seam: 'corner', seamGap: 10, scarfSeam: 'none', scarfLength: 10, scarfStartHeight: 0,
@@ -368,7 +379,7 @@ export const PROCESS_BASE = {
   outerWallSpeed: 200, innerWallSpeed: 300, sparseInfillSpeed: 270, solidInfillSpeed: 250, topSurfaceSpeed: 200,
   supportSpeed: 150, supportInterfaceSpeed: 80, travelSpeed: 500, minSpeedFloor: 20,
   accelDefault: 10000, accelOuterWall: 5000, accelInnerWall: 10000, accelTop: 5000, accelInfill: 12000, accelFirst: 500, accelTravel: 12000,
-  supportEnable: false, supportAngle: 30, supportBuildPlateOnly: false, supportPattern: 'rectilinear', supportSpacing: 2.5,
+  supportEnable: false, supportType: 'normal', treeBranchAngle: 40, treeTipDiameter: 1.6, treeTipSpacing: 5, treeMaxDiameter: 10, supportAngle: 30, supportBuildPlateOnly: false, supportPattern: 'rectilinear', supportSpacing: 2.5,
   supportTopZ: 0.2, supportBottomZ: 0.2, supportXY: 0.35, supportInterfaceLayers: 2, supportInterfaceSpacing: 0.5, supportSlot: 'auto',
   skirtLoops: 1, skirtDistance: 5, skirtHeight: 1, brimWidth: 0, brimGap: 0.1,
   primeTower: true, flushTarget: 'tower', flushIntoInfill: true, purgeVolume: 120, towerWidth: 35, towerSpeed: 150, towerAuto: true, towerX: 230, towerY: 230,

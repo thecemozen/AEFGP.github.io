@@ -1390,6 +1390,7 @@
       var o = difference(U[li], offset(U[li - 1], layers[li].h / Math.tan(ang), false)); // değişken katmanda katmanın kendi yüksekliği
       ov.push(opening(o, S.W.support * 1.5));
     }
+    if (S.supportType === 'tree') return treeSupports(U, layers, S, bed, ov, gapTop, gapBot);
     var P = [];
     for (li = nL - 1; li >= 0; li--) {
       var src = P.length ? P[0] : [];
@@ -1413,6 +1414,91 @@
       if (!sup[li].length || !N) continue;
       var cont = sup[li];
       for (var j = 1; j <= N && cont.length; j++) cont = li + j < nL ? intersect(cont, sup[li + j]) : [];
+      iface[li] = difference(sup[li], cont);
+      sup[li] = cont;
+    }
+    return { sup: sup, iface: iface };
+  }
+
+  // Ağaç destek (Orca: tree support): çıkıntıların altında uçlar açılır; uçlar her katmanda komşu dallara doğru eğilip
+  // birleşir, kalınlaşır ve modele olan uzaklık alanıyla modelden kaçarak tablaya iner. Tepede, arayüz katmanlarında
+  // çıkıntı alanının tamamı desteklenir.
+  function treeSupports(U, layers, S, bed, ov, gapTop, gapBot) {
+    var nL = layers.length, sup = [], iface = [], xy = S.supportXY, i, li;
+    for (i = 0; i < nL; i++) { sup.push([]); iface.push([]); }
+    // ızgara: tüm modelin kapladığı alan + 15 mm pay
+    var b = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+    U.forEach(function (u) { if (u.length) { var q = bboxOf(u); b.minX = Math.min(b.minX, q.minX); b.minY = Math.min(b.minY, q.minY); b.maxX = Math.max(b.maxX, q.maxX); b.maxY = Math.max(b.maxY, q.maxY); } });
+    if (!isFinite(b.minX)) return { sup: sup, iface: iface };
+    var x0 = Math.max(0, b.minX / SCALE - 15), y0 = Math.max(0, b.minY / SCALE - 15), x1 = Math.min(bed.x, b.maxX / SCALE + 15), y1 = Math.min(bed.y, b.maxY / SCALE + 15);
+    var res = Math.max(0.4, Math.sqrt((x1 - x0) * (y1 - y0) / 160000));
+    var G = { x0: x0, y0: y0, res: res, W: Math.ceil((x1 - x0) / res) + 1, H: Math.ceil((y1 - y0) / res) + 1 };
+    var tipR = Math.max(0.5, num(S.treeTipDiameter, 1.6) / 2), maxR = num(S.treeMaxDiameter, 10) / 2;
+    var lean = Math.tan(Math.max(10, Math.min(80, num(S.treeBranchAngle, 40))) * Math.PI / 180);
+    var spacing = Math.max(1.5, num(S.treeTipSpacing, 3));
+    var nIf = Math.max(0, S.supportInterfaceLayers);
+    var circle = function (x, y, r) { var p = []; for (var k = 0; k < 20; k++) { var a = k / 20 * Math.PI * 2; p.push({ X: Math.round((x + r * Math.cos(a)) * SCALE), Y: Math.round((y + r * Math.sin(a)) * SCALE) }); } return p; };
+    var nodes = [], contact = [];
+    for (li = nL - 1; li >= 0; li--) {
+      var h = layers[li].h, step = h * lean;
+      // modelden uzaklık (boş alan = 1)
+      var modelM = rasterize(U[li], G), free = new Uint8Array(G.W * G.H);
+      for (i = 0; i < free.length; i++) free[i] = modelM[i] ? 0 : 1;
+      var dist = edt2d(free, G.W, G.H);
+      var dAt = function (x, y) { var ci = Math.floor((x - G.x0) / G.res), cj = Math.floor((y - G.y0) / G.res); if (ci < 1 || cj < 1 || ci >= G.W - 1 || cj >= G.H - 1) return { d: 1e9, gx: 0, gy: 0 }; var c = cj * G.W + ci;
+        return { d: Math.sqrt(dist[c]) * G.res, gx: Math.sqrt(dist[c + 1]) - Math.sqrt(dist[c - 1]), gy: Math.sqrt(dist[c + G.W]) - Math.sqrt(dist[c - G.W]) }; };
+      // yeni uçlar: bu katmanın üstündeki çıkıntı (üst Z boşluğu kadar yukarıda)
+      var ovA = (li + 1 + gapTop < nL) ? ov[li + 1 + gapTop] : [];
+      if (ovA.length) {
+        contact.push({ area: ovA, until: li - nIf + 1 });
+        var m2 = rasterize(ovA, G), st = Math.max(1, Math.round(spacing / G.res)), occ = new Set();
+        nodes.forEach(function (n) { occ.add(Math.floor(n.x / spacing) + ',' + Math.floor(n.y / spacing)); });
+        var spawned = 0;
+        for (var j = Math.floor(st / 2); j < G.H; j += st) for (var ii = Math.floor(st / 2); ii < G.W; ii += st) {
+          if (!m2[j * G.W + ii]) continue;
+          var x = G.x0 + (ii + 0.5) * G.res, y = G.y0 + (j + 0.5) * G.res, key = Math.floor(x / spacing) + ',' + Math.floor(y / spacing);
+          if (occ.has(key)) continue; occ.add(key); nodes.push({ x: x, y: y, r: tipR }); spawned++;
+        }
+        if (!spawned) { var q2 = bboxOf(ovA); nodes.push({ x: (q2.minX + q2.maxX) / 2 / SCALE, y: (q2.minY + q2.maxY) / 2 / SCALE, r: tipR }); }
+      }
+      // hareket: komşu dalların ağırlık merkezine doğru (birleşmek için), modelden kaçarak
+      var moved = [];
+      for (i = 0; i < nodes.length; i++) {
+        // en yakın dala doğru (ikişer ikişer birleşerek az sayıda gövdeye iner)
+        var n = nodes[i], best = null, bd = 25;
+        for (var k2 = 0; k2 < nodes.length; k2++) { if (k2 === i) continue; var o = nodes[k2], dd = Math.hypot(o.x - n.x, o.y - n.y); if (dd < bd) { bd = dd; best = o; } }
+        var nx = n.x, ny = n.y;
+        if (best && bd > 1e-6) { var mv = Math.min(step, bd / 2); nx += (best.x - n.x) / bd * mv; ny += (best.y - n.y) / bd * mv; }
+        var D = dAt(nx, ny), need = n.r + xy;
+        if (D.d < need) { // modele çok yakın: uzaklık alanının artan yönünde kaç
+          var gl = Math.hypot(D.gx, D.gy);
+          if (gl > 1e-6) { nx += D.gx / gl * Math.min(step * 1.5, need - D.d + 0.1); ny += D.gy / gl * Math.min(step * 1.5, need - D.d + 0.1); }
+          D = dAt(nx, ny);
+        }
+        if (D.d < Math.max(0.2, xy * 0.5)) continue; // modelin içine düştü: bu dal modelin üstünde biter
+        moved.push({ x: nx, y: ny, r: Math.min(maxR, n.r + h * 0.03) });
+      }
+      // birleştirme
+      var merged = [];
+      moved.sort(function (a, c) { return c.r - a.r; });
+      moved.forEach(function (n) {
+        for (var k3 = 0; k3 < merged.length; k3++) { var m = merged[k3]; if (Math.hypot(m.x - n.x, m.y - n.y) < (m.r + n.r) * 0.6) {
+          var A = m.r * m.r, B = n.r * n.r; m.x = (m.x * A + n.x * B) / (A + B); m.y = (m.y * A + n.y * B) / (A + B); m.r = Math.min(maxR, Math.sqrt(A + B)); return; } }
+        merged.push({ x: n.x, y: n.y, r: n.r });
+      });
+      nodes = merged;
+      // bu katmanın destek bölgesi: dallar + arayüz katmanlarında çıkıntı alanı
+      var polys = nodes.map(function (n) { return circle(n.x, n.y, n.r); });
+      contact = contact.filter(function (c) { if (li >= c.until) { polys = polys.concat(c.area); return true; } return false; });
+      var sreg = polys.length ? difference(union(polys), offset(U[li], xy, false)) : [];
+      for (var g = 1; g <= gapBot && li - g >= 0 && sreg.length; g++) sreg = difference(sreg, U[li - g]);
+      sup[li] = sreg;
+    }
+    // arayüz: üstündeki N katman içinde biten destek
+    for (li = 0; li < nL; li++) {
+      if (!sup[li].length || !nIf) continue;
+      var cont = sup[li];
+      for (var j2 = 1; j2 <= nIf && cont.length; j2++) cont = li + j2 < nL ? intersect(cont, sup[li + j2]) : [];
       iface[li] = difference(sup[li], cont);
       sup[li] = cont;
     }
@@ -1445,6 +1531,32 @@
     function retractSpd() { return num(fil().retractSpeed, S.retractSpeed); }
     function deretractSpd() { return num(fil().deretractSpeed, S.deretractSpeed); }
     function zHop() { return num(fil().zHop, S.zHop); }
+    var hopped = 0, pendingHop = 0; // uygulanmış ve bekleyen Z kaldırma
+    // Hıza göre pressure advance (Orca: adaptive pressure advance): kalibrasyon tablosundan (PA, akış mm³/s, ivme)
+    // her hareketin akışına ve ivmesine göre PA hesaplanıp değiştiğinde yazıcıya gönderilir
+    var curPA = null;
+    function paModel() {
+      var F = fil(); if (F._paModel !== undefined) return F._paModel;
+      var rows = String(F.paModel || '').split(/\n|;/).map(function (l) { return l.split(',').map(parseFloat); }).filter(function (r) { return r.length >= 3 && r.every(isFinite); });
+      var byA = {}; rows.forEach(function (r) { (byA[r[2]] = byA[r[2]] || []).push([r[1], r[0]]); });
+      var accs = Object.keys(byA).map(Number).sort(function (a, b) { return a - b; });
+      accs.forEach(function (a) { byA[a].sort(function (p, q) { return p[0] - q[0]; }); });
+      return (F._paModel = accs.length ? { accs: accs, byA: byA } : null);
+    }
+    function paAt(list, flow) { // akışa göre doğrusal ara değer
+      if (flow <= list[0][0]) return list[0][1];
+      for (var i = 1; i < list.length; i++) if (flow <= list[i][0]) { var a = list[i - 1], b = list[i]; return a[1] + (b[1] - a[1]) * (flow - a[0]) / ((b[0] - a[0]) || 1); }
+      return list[list.length - 1][1];
+    }
+    function adaptPA(flow, accel) {
+      var m = paModel(); if (!m) return;
+      var A = m.accs, pa;
+      if (accel <= A[0]) pa = paAt(m.byA[A[0]], flow);
+      else if (accel >= A[A.length - 1]) pa = paAt(m.byA[A[A.length - 1]], flow);
+      else for (var i = 1; i < A.length; i++) if (accel <= A[i]) { var p0 = paAt(m.byA[A[i - 1]], flow), p1 = paAt(m.byA[A[i]], flow); pa = p0 + (p1 - p0) * (accel - A[i - 1]) / (A[i] - A[i - 1]); break; }
+      pa = Math.round(Math.max(0, pa) * 1000) / 1000;
+      if (curPA === null || Math.abs(pa - curPA) >= 0.002) { out.push('SET_PRESSURE_ADVANCE ADVANCE=' + pa.toFixed(3)); curPA = pa; }
+    }
     function fa() { var d = fil().filamentDiameter || 1.75; return Math.PI * d * d / 4; }
 
     function setAccel(a) {
@@ -1494,11 +1606,15 @@
       retracted = true;
       stats.retracts++;
       var zh = zHop();
-      if (zh > 0) out.push('G1 Z' + f3(pos.z + zh) + ' F' + Math.round(S.zSpeed * 60));
+      if (zh > 0) {
+        if (S.zHopType === 'slope') pendingHop = zh;             // kalkış bir sonraki boş hareketle eğimli yapılır
+        else { out.push('G1 Z' + f3(pos.z + zh) + ' F' + Math.round(S.zSpeed * 60)); hopped = zh; }
+      }
     }
     function unretract() {
       if (!retracted) return;
-      if (zHop() > 0) out.push('G1 Z' + f3(pos.z) + ' F' + Math.round(S.zSpeed * 60));
+      if (hopped > 0) out.push('G1 Z' + f3(pos.z) + ' F' + Math.round(S.zSpeed * 60));
+      hopped = 0; pendingHop = 0;
       out.push('G1 E' + f3(retractLen()) + ' F' + Math.round(deretractSpd() * 60));
       stats.time += retractLen() / deretractSpd();
       retracted = false;
@@ -1524,6 +1640,18 @@
       (route || [[x, y]]).forEach(function (q) {
         var dd = Math.hypot(q[0] - pos.x, q[1] - pos.y);
         if (dd < 0.01) return;
+        // Eğimli Z kaldırma (Orca: z_hop_types Slope): nozul yerinde dikey kalkmaz, ilerlerken yükselir;
+        // ip ve damla bırakma ihtimali azalır, kalkış süresi gizlenir
+        if (pendingHop > 0) {
+          var tanA = Math.tan(Math.max(1, Math.min(60, num(S.travelSlope, 3))) * Math.PI / 180), ramp = pendingHop / tanA;
+          var lift = Math.min(pendingHop, dd * tanA), rl = Math.min(dd, ramp), rx = pos.x + (q[0] - pos.x) * rl / dd, ry = pos.y + (q[1] - pos.y) * rl / dd;
+          out.push('G0 X' + f3(rx) + ' Y' + f3(ry) + ' Z' + f3(pos.z + lift) + ' F' + Math.round(spd * 60));
+          stats.time += moveTime(rl, spd, Math.min(S.accelTravel, S.machineMaxAccel));
+          preview.push(pos.x, pos.y, pos.z, rx, ry, pos.z, T.TRAVEL, extruder, 0, 0, spd);
+          pos.x = rx; pos.y = ry; hopped = lift; pendingHop = 0;
+          dd = Math.hypot(q[0] - pos.x, q[1] - pos.y);
+          if (dd < 0.01) return;
+        }
         out.push('G0 X' + f3(q[0]) + ' Y' + f3(q[1]) + ' F' + Math.round(spd * 60));
         stats.time += moveTime(dd, spd, Math.min(S.accelTravel, S.machineMaxAccel)); // süre, sonraki yolun türüne yazılır
         preview.push(pos.x, pos.y, pos.z, q[0], q[1], pos.z, T.TRAVEL, extruder, 0, 0, spd); // kafa hareketi önizlemesi için hep kaydedilir
@@ -1572,6 +1700,7 @@
       var vmax = num(F.maxVolumetric, 20) / (width * height);
       var sp = Math.max(Math.min(speed * speedFactor, vmax, S.machineMaxSpeed), Math.min(S.minSpeedFloor, speed));
       var eArea = (width - height * (1 - Math.PI / 4)) * height * (flow || 1) * partFlow * num(F.flowRatio, 1) / fa();
+      if (F.adaptivePA && !calib) adaptPA(sp * (width - height * (1 - Math.PI / 4)) * height, accel);
       var first = true, seg = [];
       for (var i = 1; i < pts.length; i++) {
         var x = pts[i][0], y = pts[i][1], z = pts[i].length > 2 ? pts[i][2] : pos.z;
@@ -1824,6 +1953,7 @@
       if (t !== tPrev) out.push('M109 S' + t);
       pushBlock(fils[to].startGcode);
       if (num(fils[to].pressureAdvance, 0) > 0) out.push('SET_PRESSURE_ADVANCE ADVANCE=' + fils[to].pressureAdvance);
+      curPA = null;
       out.push('G1 Z' + f3(pos.z) + ' F' + Math.round(S.zSpeed * 60));
       stats.toolChanges++;
       stats.time += S.toolChangeTime;
@@ -1876,7 +2006,9 @@
       }
       if (!spiral) {
         if (S.retractOnLayerChange) retract();
-        out.push('G1 Z' + f3(Ly.z + (retracted && zHop() > 0 ? zHop() : 0)) + ' F' + Math.round(S.zSpeed * 60));
+        var hopNow = retracted && zHop() > 0 ? zHop() : 0;
+        out.push('G1 Z' + f3(Ly.z + hopNow) + ' F' + Math.round(S.zSpeed * 60));
+        hopped = hopNow; pendingHop = 0;
         pos.z = Ly.z;
       }
       if (li === 1) {
@@ -1900,7 +2032,8 @@
       slots.sort(function (a, b) { return (a === extruder ? -1 : 0) - (b === extruder ? -1 : 0) || a - b; });
 
       var snap = { pos: { x: pos.x, y: pos.y, z: pos.z }, e: stats.e.slice(), t: stats.time, pv: preview.length, out: out.length,
-        retracted: retracted, curF: curF, curAccel: curAccel, fan: JSON.stringify(fanState), ext: extruder, tc: stats.toolChanges };
+        retracted: retracted, curF: curF, curAccel: curAccel, fan: JSON.stringify(fanState), ext: extruder, tc: stats.toolChanges,
+        hopped: hopped, pendingHop: pendingHop, pa: curPA, fseed: fuzzSeed };
       speedFactor = 1;
       for (var attempt = 0; attempt < 2; attempt++) {
         emitLayer();
@@ -1911,6 +2044,7 @@
           pos.x = snap.pos.x; pos.y = snap.pos.y; pos.z = snap.pos.z;
           stats.e = snap.e.slice(); stats.time = snap.t; retracted = snap.retracted; curF = snap.curF;
           curAccel = snap.curAccel; fanState = JSON.parse(snap.fan); extruder = snap.ext; stats.toolChanges = snap.tc;
+          hopped = snap.hopped; pendingHop = snap.pendingHop; curPA = snap.pa; fuzzSeed = snap.fseed;
           speedFactor = Math.max(layerTime / minT, (num(fil().minSpeed, 20)) / Math.max(1, S.outerWallSpeed));
           out.push('; min layer time: speed ' + Math.round(speedFactor * 100) + '%');
           continue;
@@ -1922,6 +2056,7 @@
       function emitLayer() {
         var changed = false;
         flushFirstSlot = -1;
+        fuzzSeed = 12345 + li * 7919; // her katmanda farklı desen (üst üste binip dikey çizgi yapmasın)
         var sk = job.skirt;
         if (sk && li < sk.layers && (sk.rings.length || (first && sk.brim.length))) {
           var wsk = first ? W.first : W.outer;
@@ -2037,6 +2172,22 @@
         return outp;
       }
       var wallRev = false, flushFirstSlot = -1;
+      // bulanık yüzey için tekrarlanabilir rastgele sayı (aynı model hep aynı G-code'u versin)
+      var fuzzSeed = 12345;
+      function rnd() { fuzzSeed = (fuzzSeed * 1103515245 + 12345) & 0x7fffffff; return fuzzSeed / 0x7fffffff; }
+      // Bulanık yüzey (Orca: fuzzy skin): dış duvar noktaları belli aralıklarla duvara dik rastgele kaydırılır
+      function fuzzLoop(pts) {
+        var t = num(S.fuzzyThickness, 0.3), pd = Math.max(0.1, num(S.fuzzyPointDist, 0.8)), out2 = [pts[0]], acc = 0;
+        for (var i = 1; i < pts.length; i++) {
+          var a = pts[i - 1], b = pts[i], dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy);
+          if (L < 1e-6) continue;
+          var nx = -dy / L, ny = dx / L, s2 = pd - acc;
+          while (s2 < L) { var o = (rnd() * 2 - 1) * t; out2.push([a[0] + dx * s2 / L + nx * o, a[1] + dy * s2 / L + ny * o]); s2 += pd; }
+          acc = L - (s2 - pd);
+        }
+        out2.push(pts[pts.length - 1]);
+        return out2;
+      }
       function emitWall(paths, isOuter, wo, wi) {
         if (!paths.length) return;
         out.push(isOuter ? ';TYPE:Outer wall' : ';TYPE:Inner wall');
@@ -2065,6 +2216,7 @@
           }
           var pts = loopFrom(paths[b], seam, near, bedCx);
           if (wallRev) pts.reverse(); // kapalı döngü: başlangıç (dikiş) noktası aynı kalır
+          if (S.fuzzySkin && S.fuzzySkin !== 'none' && !first && (isOuter || S.fuzzySkin === 'all')) pts = fuzzLoop(pts);
           if (isOuter) lastSeam = pts[0];
           // çıkıntı sınıfları
           var cls = null, anyOv = false;
@@ -2183,7 +2335,7 @@
     // Başlık bloğu: Moonraker/Fluidd dilimleyiciyi "; generated by AD SÜRÜM on TARİH at SAAT" satırından tanır
     var now = new Date(), p2 = function (n) { return (n < 10 ? '0' : '') + n; };
     header.push('; HEADER_BLOCK_START');
-    header.push('; generated by K1MaxDilimleyici 2.24 on ' + now.getFullYear() + '-' + p2(now.getMonth() + 1) + '-' + p2(now.getDate()) +
+    header.push('; generated by K1MaxDilimleyici 2.25 on ' + now.getFullYear() + '-' + p2(now.getMonth() + 1) + '-' + p2(now.getDate()) +
       ' at ' + p2(now.getHours()) + ':' + p2(now.getMinutes()) + ':' + p2(now.getSeconds()));
     header.push('; total layer number: ' + nL);
     header.push('; HEADER_BLOCK_END', '');
