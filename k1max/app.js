@@ -39,7 +39,7 @@ function toBlob(text, id) {
 }
 
 // ================================================================= durum ve profiller
-const APP_VERSION = '2.25';
+const APP_VERSION = '2.26';
 const DEVICE_KEYS = ['hostIp', 'hostPort', 'apiKey', 'startLineInfo'];
 const FAST_PRESET = 'Hızlı baskı (uyarlanabilir 0.10–0.28)';
 let state = null;
@@ -389,7 +389,7 @@ function renderQuick() {
   fillPresetSelect($('qProcess'), 'process', state.process.name);
   const P = state.process.values;
   $('qFast').hidden = state.process.name === FAST_PRESET && !isModified('process', state.process);
-  const pat = { speed: 'hızlı', grid: 'ızgara', gyroid: 'gyroid', cubic: 'kübik', triangles: 'üçgen', rectilinear: 'doğrusal', concentric: 'eş merkezli' }[P.infillPattern] || P.infillPattern;
+  const pat = { speed: 'hızlı', grid: 'ızgara', gyroid: 'gyroid', cubic: 'kübik', triangles: 'üçgen', rectilinear: 'doğrusal', concentric: 'eş merkezli', adaptivecubic: 'uyarlanabilir kübik', lightning: 'yıldırım', honeycomb: 'petek', '3dhoneycomb': '3B petek', crosshatch: 'çapraz tarama', tpmsd: 'TPMS-D' }[P.infillPattern] || P.infillPattern;
   $('qHint').textContent = (P.adaptiveLayers && !P.spiralVase ? `Katman ${P.adaptiveMinH}–${P.adaptiveMaxH} mm (uyarlanabilir)` : `Katman ${P.layerHeight} mm`) + ` · ${P.wallLoops} duvar · %${P.infillDensity} ${pat}` +
     (P.supportEnable ? ' · destek açık' : '') + (P.spiralVase ? ' · vazo modu' : '') +
     (isModified('process', state.process) ? ' · (değiştirildi)' : '');

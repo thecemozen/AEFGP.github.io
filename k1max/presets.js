@@ -212,6 +212,8 @@ export const PROCESS_SCHEMA = [
     { k: 'thinWalls', l: 'İnce detaylarda değişken çizgi (Arachne benzeri)', t: 'b', tip: 'Duvar halkasının iki kenarının üst üste bineceği kadar dar yerlerde (ince çizgiler, yazılar, kar tanesi kolları) halka yerine ortasından geçen tek, değişken kalınlıklı çizgi basılır. Fazla malzemeyi ve pütürleri önler, ince detaylardaki boşlukları kapatır.' },
     { k: 'onlyOneWallTop', l: 'Üst yüzeyde tek duvar', t: 'b', tip: 'Tamamı üst yüzey olan katmanlarda yalnızca dış duvar basılır, içi üst yüzey çizgileriyle dolar (Orca: only one wall on top). Üst yüzey daha düzgün ve tek parça görünür, süre kısalır.' },
     { k: 'smoothCurves', l: 'Köşeli kavisleri yumuşat', t: 'b', tip: 'Düşük çözünürlükte çizilmiş modellerde kavisler uzun düz parçalardan oluşur ve baskıda köşeli görünür. Açıkken hafif açılı (35°\'den az) köşeler, köşe noktalarından geçen düzgün bir eğriyle değiştirilir; keskin köşeler aynen kalır. Ölçü hassasiyeti gereken teknik parçalarda kapalı tutun.' },
+    { k: 'polyholes', l: 'Yuvarlak delikleri çokgen yap', t: 'b', tip: 'Küçük (çapı 20 mm\'ye kadar) yuvarlak delikler, kenarları daireye teğet bir çokgene çevrilir (Orca: hole to polyhole). Yuvarlak delikler baskıda genelde dar çıkar; böylece vida, pim ve rulmanlar tam ölçüde girer.' },
+    { k: 'arcFitting', l: 'Yay birleştirme (G2/G3)', t: 'b', tip: 'Kavisli yollardaki çok sayıda kısa düz hareket tek bir yay komutuna (G2/G3) çevrilir. G-code küçülür, kavisler daha akıcı basılır. K1 Max yay komutlarını destekler.' },
     { k: 'sliceMode', l: 'Kesit modu', t: 's', o: { regular: 'Normal (iç içe gövdeler birleşir)', evenodd: 'Çift-tek (özel modeller)' }, tip: 'Normal: birbirinin içine geçen gövdeler tek parça gibi basılır (OrcaSlicer ile aynı). Çift-tek: üst üste binen bölgeler boş kalır; yalnızca bunun için tasarlanmış modellerde kullanın.', adv: true },
     { k: 'resolution', l: 'Kesit çözünürlüğü', u: 'mm', t: 'n', min: 0, max: 0.1, s: 0.0005, tip: 'Kesitteki bu mesafeden küçük ayrıntılar sadeleştirilir (Orca: 0.012). Milyonlarca üçgenli modellerde dilimlemeyi kat kat hızlandırır; nozulun basabileceği ayrıntı kaybolmaz.', adv: true },
   ]},
@@ -263,7 +265,7 @@ export const PROCESS_SCHEMA = [
   { g: 'Üst / alt kabuk', sec: 'Dayanıklılık', items: [
     { k: 'topLayers', l: 'Üst katman sayısı', t: 'n', min: 0, max: 30, s: 1 },
     { k: 'topThickness', l: 'Üst kabuk min. kalınlığı', u: 'mm', t: 'n', min: 0, max: 5, s: 0.1, tip: 'İnce katmanlarda katman sayısı bu kalınlığa ulaşacak kadar artırılır.' },
-    { k: 'topPattern', l: 'Üst yüzey deseni', t: 's', o: { monotonic: 'Monoton', lines: 'Çizgi (zikzak)', concentric: 'Eş merkezli' } },
+    { k: 'topPattern', l: 'Üst yüzey deseni', t: 's', o: { monotonic: 'Monoton', lines: 'Çizgi (zikzak)', concentric: 'Eş merkezli', hilbert: 'Hilbert eğrisi', archimedean: 'Arşimet spirali', octagram: 'Sekiz köşeli yıldız spirali' }, tip: 'Hilbert, Arşimet ve yıldız spirali dekoratif desenlerdir; ışıkta farklı parlayan, desenli bir üst yüzey verir. Monoton en düzgün sonucu verir.' },
     { k: 'topAngleMode', l: 'Üst yüzey yönü', t: 's', o: { auto: 'Otomatik (en uzun kenara paralel)', alternate: 'Katmana göre değişen', fixed: 'Sabit açı' }, tip: 'Otomatik: çizgiler parçanın en uzun yönünde atılır; daha az çizgi ucu ve dönüş, daha düzgün görünüm.' },
     { k: 'topAngle', l: 'Üst yüzey açısı', u: '°', t: 'n', min: 0, max: 179, s: 1, adv: true },
     { k: 'topFlow', l: 'Üst yüzey akışı', t: 'n', min: 0.8, max: 1.2, s: 0.01, tip: 'Üst yüzeyde çizgiler arasında oluk görüyorsanız %1–3 artırın, kabarıklık varsa azaltın.', adv: true },
@@ -273,7 +275,7 @@ export const PROCESS_SCHEMA = [
   ]},
   { g: 'Dolgu', sec: 'Dayanıklılık', items: [
     { k: 'infillDensity', l: 'Seyrek dolgu yoğunluğu', u: '%', t: 'n', min: 0, max: 100, s: 1 },
-    { k: 'infillPattern', l: 'Dolgu deseni', t: 's', o: { grid: 'Izgara', gyroid: 'Gyroid', cubic: 'Kübik', triangles: 'Üçgen', rectilinear: 'Doğrusal', concentric: 'Eş merkezli', helix: 'Sarmal (deneysel)', golden: 'Altın açı (deneysel)', speed: 'Hızlı (deneysel)', adaptivecubic: 'Uyarlanabilir kübik', lightning: 'Yıldırım (yalnızca üst yüzeyleri taşır)' }, tip: 'Uyarlanabilir kübik: yüzeylere ve duvarlara uzak derin bölgelerde seyrekleşir. Yıldırım: yalnızca üst yüzeylerin altına dal basar; en hızlı ve en az filament, ama içi boşa yakın — dayanım gerekmeyen süs ve figürler için.' },
+    { k: 'infillPattern', l: 'Dolgu deseni', t: 's', o: { grid: 'Izgara', gyroid: 'Gyroid', cubic: 'Kübik', triangles: 'Üçgen', rectilinear: 'Doğrusal', concentric: 'Eş merkezli', helix: 'Sarmal (deneysel)', golden: 'Altın açı (deneysel)', speed: 'Hızlı (deneysel)', adaptivecubic: 'Uyarlanabilir kübik', lightning: 'Yıldırım (yalnızca üst yüzeyleri taşır)', honeycomb: 'Petek', '3dhoneycomb': '3B petek', crosshatch: 'Çapraz tarama', tpmsd: 'TPMS-D (Schwarz elmas)' }, tip: 'Petek: her yönde sağlam, ama yavaş. 3B petek: katmanla kayan petek, her eksende dayanım. Çapraz tarama: belli yüksekliklerde yön değiştiren düz çizgiler, hızlı ve sağlam. TPMS-D: gyroide benzer, her yönde eşit dayanımlı ve kesişmeyen sürekli yüzey. Uyarlanabilir kübik: yüzeylere ve duvarlara uzak derin bölgelerde seyrekleşir. Yıldırım: yalnızca üst yüzeylerin altına dal basar; en hızlı ve en az filament, ama içi boşa yakın — dayanım gerekmeyen süs ve figürler için.' },
     { k: 'lightningAngle', l: 'Yıldırım dal açısı', u: '°', t: 'n', min: 10, max: 70, s: 5, tip: 'Dalların dikeyden en fazla ne kadar eğilerek duvara ulaşacağı. Büyük değer: daha kısa dallar, daha az filament.', adv: true },
     { k: 'adaptiveCubicDepth', l: 'Uyarlanabilir kübik derinliği', u: 'mm', t: 'n', min: 1, max: 20, s: 0.5, tip: 'Yüzeylerden bu mesafeden derin bölgelerde dolgu yarıya, üç katından derinde dörtte bire iner.', adv: true },
     { k: 'helixStep', l: 'Sarmal dönüş açısı', u: '°/katman', t: 'n', min: 5, max: 90, s: 1, tip: 'Sarmal desende her katmanda çizgi yönünün dönme miktarı.', adv: true },
@@ -282,12 +284,17 @@ export const PROCESS_SCHEMA = [
     { k: 'infillAngle', l: 'Dolgu açısı', u: '°', t: 'n', min: -180, max: 180, s: 5, adv: true },
     { k: 'solidAngle', l: 'Katı dolgu açısı', u: '°', t: 'n', min: -180, max: 180, s: 5, adv: true },
     { k: 'infillOverlap', l: 'Dolgu/duvar bindirme', u: '%', t: 'n', min: 0, max: 60, s: 1, adv: true },
+    { k: 'smallAreaFlowComp', l: 'Küçük alanlarda akış telafisi', t: 'b', tip: 'Küçük katı dolgu bölgelerindeki kısa çizgilerde akış, Orca\'nın varsayılan eğrisine göre azaltılır (Orca: small area infill flow compensation). Küçük üst yüzeylerde fazla malzemeden doğan kabarma ve pürüzü azaltır.' },
     { k: 'minSparseArea', l: 'Küçük alanları katı doldur', u: 'mm²', t: 'n', min: 0, max: 100, s: 1, tip: 'Bundan küçük seyrek dolgu alanları katı basılır.', adv: true },
   ]},
   { g: 'Çıkıntılar', sec: 'Hız', items: [
     { k: 'overhangSlowdown', l: 'Çıkıntılarda yavaşla', t: 'b', tip: 'Alt katmanın dışına taşan duvar bölümleri yavaş basılır, havada kalanlarda fan artırılır. Sarkmayı azaltır.' },
     { k: 'overhangSpeedMid', l: 'Kısmi çıkıntı hızı', u: 'mm/s', t: 'n', min: 5, max: 400, s: 5, tip: 'Çizgi genişliğinin %25–75\'i kadar taşan bölümler.' },
     { k: 'overhangSpeed', l: 'Havadaki çıkıntı hızı', u: 'mm/s', t: 'n', min: 5, max: 400, s: 5 },
+    { k: 'extraPerimetersOverhang', l: 'Çıkıntılarda ek duvar', t: 'b', tip: 'Alt katmanın taşımadığı (köprü olmayan) iç bölgeler dolgu yerine dıştan içe duvar halkalarıyla basılır (Orca: extra perimeters on overhangs). Desteksiz çıkıntılar daha sağlam ve düzgün olur.' },
+    { k: 'overhangReverse', l: 'Çıkıntıda yönü ters çevir', t: 'b', tip: 'Çıkıntı içeren duvarlar tek katmanlarda ters yönde basılır (Orca: reverse on odd). Çıkıntı kenarının hep aynı yöne kıvrılması önlenir.' },
+    { k: 'makeOverhangPrintable', l: 'Çıkıntıyı basılabilir yap (koni)', t: 'b', tip: 'Desteksiz basılamayacak kadar yatık çıkıntıların altı, model şekli değiştirilerek eşik açısında bir koniyle doldurulur (Orca: make overhang printable). Destek gerekmez ama modelin alt görünümü değişir; ölçü önemli parçalarda kapalı tutun.' },
+    { k: 'makeOverhangAngle', l: 'Koni eşik açısı', u: '°', t: 'n', min: 20, max: 80, s: 5, adv: true, tip: 'Yataydan ölçülür; 55° iyi bir başlangıçtır.' },
   ]},
   { g: 'Köprüler', sec: 'Dayanıklılık', items: [
     { k: 'bridgeDetect', l: 'Köprü algılama', t: 'b', tip: 'Havada kalan katı alanlar köprü ayarlarıyla, en kısa açıklık yönünde basılır.' },
@@ -333,6 +340,7 @@ export const PROCESS_SCHEMA = [
     { k: 'supportBottomZ', l: 'Alt Z mesafesi', u: 'mm', t: 'n', min: 0, max: 1, s: 0.02, adv: true },
     { k: 'supportXY', l: 'XY mesafesi', u: 'mm', t: 'n', min: 0, max: 3, s: 0.05 },
     { k: 'supportInterfaceLayers', l: 'Arayüz katmanı', t: 'n', min: 0, max: 10, s: 1, tip: 'Desteğin üstündeki sık katmanlar; modelin alt yüzeyini düzgünleştirir.' },
+    { k: 'supportIroning', l: 'Destek arayüzünü ütüle', t: 'b', tip: 'En üst destek arayüz katmanı az akışla tekrar geçilerek düzlenir (Orca: support ironing). Desteğe oturan alt yüzeyler daha düzgün çıkar. Ütüleme hız/akış/aralık ayarlarını kullanır.' },
     { k: 'supportInterfaceSpacing', l: 'Arayüz boşluğu', u: 'mm', t: 'n', min: 0, max: 3, s: 0.05, adv: true },
     { k: 'supportSlot', l: 'Destek filamenti', t: 's', o: { auto: 'Otomatik', 0: 'Yuva 1', 1: 'Yuva 2', 2: 'Yuva 3', 3: 'Yuva 4' }, tip: 'CFS ile desteği ayrı (ör. kolay sökülen) bir filamentle basabilirsiniz.' },
   ]},
@@ -341,6 +349,9 @@ export const PROCESS_SCHEMA = [
     { k: 'skirtDistance', l: 'Etek mesafesi', u: 'mm', t: 'n', min: 0, max: 50, s: 0.5 },
     { k: 'skirtHeight', l: 'Etek yüksekliği', u: 'katman', t: 'n', min: 1, max: 50, s: 1, adv: true },
     { k: 'brimWidth', l: 'Kenarlık genişliği', u: 'mm', t: 'n', min: 0, max: 30, s: 0.5 },
+    { k: 'brimType', l: 'Kenarlık türü', t: 's', o: { outer: 'Dış kenar boyunca', ears: 'Fare kulağı (yalnızca köşelerde)' }, tip: 'Fare kulağı: yalnızca keskin köşelere yuvarlak kenarlık basılır (Orca: mouse ear). Köşe kalkmasını önler, sökmesi kolaydır, daha az filament harcar.' },
+    { k: 'brimEarAngle', l: 'Kulak için köşe açısı', u: '°', t: 'n', min: 30, max: 175, s: 5, adv: true, tip: 'Bu açıdan daha keskin köşelere kulak eklenir.' },
+    { k: 'draftShield', l: 'Rüzgar kalkanı', t: 'b', tip: 'Etek, modelin tüm yüksekliği boyunca ince bir duvar olarak basılır (Orca: draft shield). Hava akımına ve soğumaya hassas ABS/ASA baskılarında çatlak ve kalkmayı azaltır. Etek tur sayısı en az 1 olarak kullanılır.' },
     { k: 'brimGap', l: 'Kenarlık-model boşluğu', u: 'mm', t: 'n', min: 0, max: 2, s: 0.05, adv: true },
   ]},
   { g: 'Temizleme kulesi (CFS)', sec: 'Diğer', items: [
@@ -364,7 +375,7 @@ export const PROCESS_SCHEMA = [
 ];
 
 export const PROCESS_BASE = {
-  layerHeight: 0.2, firstLayerHeight: 0.2, resolution: 0.0125, sliceMode: 'regular', smoothCurves: false, fuzzySkin: 'none', fuzzyThickness: 0.3, fuzzyPointDist: 0.8, thinWalls: true, onlyOneWallTop: true, smallPerimeterSpeed: 50, smallPerimeterThreshold: 6.5, adaptiveLayers: false, adaptiveMinH: 0.08, adaptiveMaxH: 0.28, adaptiveQuality: 50,
+  layerHeight: 0.2, firstLayerHeight: 0.2, resolution: 0.0125, sliceMode: 'regular', smoothCurves: false, polyholes: false, arcFitting: false, smallAreaFlowComp: false, extraPerimetersOverhang: false, overhangReverse: false, makeOverhangPrintable: false, makeOverhangAngle: 55, supportIroning: false, brimType: 'outer', brimEarAngle: 125, draftShield: false, fuzzySkin: 'none', fuzzyThickness: 0.3, fuzzyPointDist: 0.8, thinWalls: true, onlyOneWallTop: true, smallPerimeterSpeed: 50, smallPerimeterThreshold: 6.5, adaptiveLayers: false, adaptiveMinH: 0.08, adaptiveMaxH: 0.28, adaptiveQuality: 50,
   lineWidth: 0.42, firstLayerLineWidth: 0.5, outerWallLineWidth: 0.42, innerWallLineWidth: 0.45, topLineWidth: 0.42,
   solidLineWidth: 0.42, sparseLineWidth: 0.45, supportLineWidth: 0.42,
   seam: 'corner', seamGap: 10, scarfSeam: 'none', scarfLength: 10, scarfStartHeight: 0,
