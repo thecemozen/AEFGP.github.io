@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 
 export function repairMesh(positions) {
-  const report = { welded: 0, degenerate: 0, duplicate: 0, flipped: 0, holes: 0, holeTris: 0, nonManifold: 0 };
+  const report = { welded: 0, degenerate: 0, duplicate: 0, flipped: 0, inverted: 0, holes: 0, holeTris: 0, nonManifold: 0 };
   const q = 1e4, map = new Map(), verts = [];
   const nIn = positions.length / 9;
   const tris = [];
@@ -63,7 +63,8 @@ export function repairMesh(positions) {
     // gövdenin hacmi negatifse (içe bakıyorsa) hepsini çevir
     let vol = 0;
     comp.forEach(i => { const a = V(good[i][0]), b = V(good[i][1]), c = V(good[i][2]); vol += a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0]); });
-    if (vol < 0) comp.forEach(i => { good[i] = [good[i][0], good[i][2], good[i][1]]; });
+    // (iç içe geçen gövdelerde ters bir gövde, kesitte diğerini siler: mutlaka düzeltilmeli)
+    if (vol < 0) { comp.forEach(i => { good[i] = [good[i][0], good[i][2], good[i][1]]; }); report.inverted++; }
   }
   // delik kapatma: tek üçgene ait (sınır) kenarları halkalara topla, düzleme izdüşürüp üçgenle
   E = buildEdges();
@@ -105,7 +106,7 @@ export function repairMesh(positions) {
   });
   const out = new Float32Array(good.length * 9);
   good.forEach((t, i) => { for (let k = 0; k < 3; k++) { const v = V(t[k]); out[i * 9 + k * 3] = v[0]; out[i * 9 + k * 3 + 1] = v[1]; out[i * 9 + k * 3 + 2] = v[2]; } });
-  report.changed = report.degenerate + report.duplicate + report.flipped + report.holes > 0;
+  report.changed = report.degenerate + report.duplicate + report.flipped + report.inverted + report.holes > 0;
   return { positions: out, report };
 }
 
@@ -113,6 +114,7 @@ export function repairSummary(r) {
   const p = [];
   if (r.holes) p.push(`${r.holes} delik kapatıldı`);
   if (r.flipped) p.push(`${r.flipped} ters üçgen düzeltildi`);
+  if (r.inverted) p.push(`${r.inverted} ters (içi dışına dönük) gövde çevrildi`);
   if (r.degenerate + r.duplicate) p.push(`${r.degenerate + r.duplicate} bozuk/tekrarlı üçgen silindi`);
   if (r.nonManifold) p.push(`${r.nonManifold} çok yüzlü kenar (onarılamadı, dilimleme yine de denenir)`);
   return p.join(', ');
