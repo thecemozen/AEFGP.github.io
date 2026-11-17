@@ -189,6 +189,7 @@ export const PROCESS_SCHEMA = [
     { k: 'firstLayerHeight', l: 'İlk katman yüksekliği', u: 'mm', t: 'n', min: 0.1, max: 0.35, s: 0.01 },
   ]},
   { g: 'Çözünürlük', sec: 'Kalite', items: [
+    { k: 'sliceMode', l: 'Kesit modu', t: 's', o: { regular: 'Normal (iç içe gövdeler birleşir)', evenodd: 'Çift-tek (özel modeller)' }, tip: 'Normal: birbirinin içine geçen gövdeler tek parça gibi basılır (OrcaSlicer ile aynı). Çift-tek: üst üste binen bölgeler boş kalır; yalnızca bunun için tasarlanmış modellerde kullanın.', adv: true },
     { k: 'resolution', l: 'Kesit çözünürlüğü', u: 'mm', t: 'n', min: 0, max: 0.1, s: 0.0005, tip: 'Kesitteki bu mesafeden küçük ayrıntılar sadeleştirilir (Orca: 0.012). Milyonlarca üçgenli modellerde dilimlemeyi kat kat hızlandırır; nozulun basabileceği ayrıntı kaybolmaz.', adv: true },
   ]},
   { g: 'Uyarlanabilir katman', sec: 'Kalite', items: [
@@ -331,7 +332,7 @@ export const PROCESS_SCHEMA = [
 ];
 
 export const PROCESS_BASE = {
-  layerHeight: 0.2, firstLayerHeight: 0.2, resolution: 0.0125, adaptiveLayers: false, adaptiveMinH: 0.08, adaptiveMaxH: 0.28, adaptiveQuality: 50,
+  layerHeight: 0.2, firstLayerHeight: 0.2, resolution: 0.0125, sliceMode: 'regular', adaptiveLayers: false, adaptiveMinH: 0.08, adaptiveMaxH: 0.28, adaptiveQuality: 50,
   lineWidth: 0.42, firstLayerLineWidth: 0.5, outerWallLineWidth: 0.42, innerWallLineWidth: 0.45, topLineWidth: 0.42,
   solidLineWidth: 0.42, sparseLineWidth: 0.45, supportLineWidth: 0.42,
   seam: 'corner', seamGap: 10, scarfSeam: 'none', scarfLength: 10, scarfStartHeight: 0,
