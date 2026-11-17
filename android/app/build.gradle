@@ -1,0 +1,36 @@
+plugins {
+    id "com.android.application"
+}
+
+android {
+    namespace "com.aefgp.prompter"
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "com.aefgp.prompter"
+        minSdk 26
+        targetSdk 35
+        versionCode 1
+        versionName "1.0"
+    }
+
+    // Web uygulamasının kendisi (../../prompter) APK'nın içine gömülür; tek kaynak orası.
+    sourceSets {
+        main.assets.srcDirs = ["../../prompter"]
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+            // Elle yükleme (sideload) için hata ayıklama anahtarıyla imzalanır.
+            signingConfig signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

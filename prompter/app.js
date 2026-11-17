@@ -289,10 +289,55 @@ function finishRecording() {
   resultFile = new File([blob], name, { type });
   resultUrl = URL.createObjectURL(blob);
   $('resVideo').src = resultUrl;
-  $('resSave').href = resultUrl;
-  $('resSave').download = name;
-  $('resShare').hidden = !(navigator.canShare && navigator.canShare({ files: [resultFile] }));
+  savedUri = null;
+  if (bridge) {
+    $('resSave').removeAttribute('href');
+    $('resSave').textContent = 'Galeriye kaydet';
+    $('resShare').hidden = false;
+  } else {
+    $('resSave').href = resultUrl;
+    $('resSave').download = name;
+    $('resShare').hidden = !(navigator.canShare && navigator.canShare({ files: [resultFile] }));
+  }
   $('result').hidden = false;
+}
+
+/* Android uygulaması içinde: videoyu parça parça yerel tarafa aktarıp galeriye yaz */
+const bridge = window.AndroidBridge || null;
+let savedUri = null, saving = false;
+
+function readChunkBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(',')[1] || '');
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(blob);
+  });
+}
+
+async function saveToGallery() {
+  if (savedUri) return savedUri;
+  if (saving || !resultFile) return null;
+  saving = true;
+  const file = resultFile, CH = 3 * 512 * 1024;
+  try {
+    if (!bridge.begin(file.name, file.type)) throw new Error('begin');
+    for (let i = 0; i < file.size; i += CH) {
+      if (!bridge.append(await readChunkBase64(file.slice(i, i + CH)))) throw new Error('append');
+      toast(`Kaydediliyor… %${Math.min(100, Math.round(((i + CH) / file.size) * 100))}`, 60000);
+    }
+    savedUri = bridge.end() || null;
+    if (!savedUri) throw new Error('end');
+    toast('Galeriye kaydedildi (Filmler › Prompter).');
+    $('resSave').textContent = 'Kaydedildi ✓';
+    return savedUri;
+  } catch {
+    try { bridge.abort(); } catch { /* yok say */ }
+    toast('Kaydedilemedi. Depolama iznini ve boş alanı kontrol et.');
+    return null;
+  } finally {
+    saving = false;
+  }
 }
 
 function closeResult() {
@@ -301,16 +346,29 @@ function closeResult() {
   $('resVideo').removeAttribute('src');
   $('resVideo').load();
   if (resultUrl) URL.revokeObjectURL(resultUrl);
-  resultUrl = null; resultFile = null;
+  resultUrl = null; resultFile = null; savedUri = null;
+}
+
+function discardResult() {
+  if (savedUri || confirm('Bu kayıt silinsin mi? Kaydetmediysen geri getirilemez.')) closeResult();
 }
 
 $('btnRec').addEventListener('click', () => (recorder ? stopRecording() : startRecording()));
-$('resSave').addEventListener('click', () => toast('İndirilenler klasörüne kaydediliyor…'));
+$('resSave').addEventListener('click', (e) => {
+  if (bridge) { e.preventDefault(); saveToGallery(); }
+  else toast('İndirilenler klasörüne kaydediliyor…');
+});
 $('resShare').addEventListener('click', async () => {
+  if (bridge) {
+    const uri = await saveToGallery();
+    if (uri) bridge.share(uri);
+    return;
+  }
   try { await navigator.share({ files: [resultFile] }); } catch { /* kullanıcı vazgeçti */ }
 });
 $('resDiscard').addEventListener('click', () => {
-  if (confirm('Bu kayıt silinsin mi? Kaydetmediysen geri getirilemez.')) closeResult();
+  if (savedUri) { closeResult(); return; }
+  discardResult();
 });
 
 /* ---------- Alt çubuk ---------- */
@@ -338,7 +396,7 @@ $('edClear').addEventListener('click', () => {
 });
 $('edPaste').addEventListener('click', async () => {
   try {
-    const clip = await navigator.clipboard.readText();
+    const clip = bridge ? bridge.readClipboard() : await navigator.clipboard.readText();
     if (!clip) { toast('Pano boş.'); return; }
     edText.setRangeText(clip, edText.selectionStart, edText.selectionEnd, 'end');
     updateCount();
@@ -405,6 +463,16 @@ applyCfg();
 startCamera();
 syncWakeLock();
 
-if ('serviceWorker' in navigator && location.protocol === 'https:') {
+/* Android geri tuşu: açık paneli kapat; kapatacak bir şey yoksa false döner ve uygulama kapanır */
+window.onAndroidBack = () => {
+  if (!$('countdown').hidden) { $('countdown').click(); return true; }
+  if (!$('editor').hidden) { $('edDone').click(); return true; }
+  if (!$('settings').hidden) { $('settings').hidden = true; return true; }
+  if (!$('result').hidden) { discardResult(); return true; }
+  if (recorder) { stopRecording(); return true; }
+  return false;
+};
+
+if (!bridge && 'serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }

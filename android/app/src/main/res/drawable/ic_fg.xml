@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 108dp ızgara; içerik ortadaki ~66dp güvenli alanda -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="4.5" android:strokeLineCap="round"
+        android:pathData="M36,36 L72,36" />
+    <path android:strokeColor="#B3FFFFFF" android:strokeWidth="4.5" android:strokeLineCap="round"
+        android:pathData="M41,46 L67,46" />
+    <path android:strokeColor="#66FFFFFF" android:strokeWidth="4.5" android:strokeLineCap="round"
+        android:pathData="M46,56 L62,56" />
+    <path android:fillColor="#FF3B4E"
+        android:pathData="M54,64 m-7,0 a7,7 0,1 1,14 0 a7,7 0,1 1,-14 0" />
+    <path android:strokeColor="#7C5CFF" android:strokeWidth="2"
+        android:pathData="M54,64 m-10,0 a10,10 0,1 1,20 0 a10,10 0,1 1,-20 0" />
+</vector>
