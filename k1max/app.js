@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
-import { CATEGORIES, SLOT_COLORS, SLOT_COUNT } from './presets.js';
+import { CATEGORIES, SLOT_COLORS, SLOT_COUNT, OLD_START_GCODE, START_GCODE } from './presets.js';
 import { load3MF } from './threemf.js';
 import { writeProject, readProject } from './project3mf.js';
 import { repairMesh, repairSummary } from './meshrepair.js';
@@ -39,11 +39,12 @@ function toBlob(text, id) {
 }
 
 // ================================================================= durum ve profiller
-const APP_VERSION = '2.18';
+const APP_VERSION = '2.19';
 const DEVICE_KEYS = ['hostIp', 'hostPort', 'apiKey', 'startLineInfo'];
 const FAST_PRESET = 'Hızlı baskı (uyarlanabilir 0.10–0.28)';
 let state = null;
 state = loadState();
+saveState();
 let viewRadius = 480;
 let result = null;
 
@@ -83,6 +84,15 @@ function loadState() {
   fix('printer', s.printer); fix('process', s.process);
   while (s.slots.length < SLOT_COUNT) s.slots.push({ name: 'Genel PLA', color: SLOT_COLORS[s.slots.length], values: null });
   s.slots.forEach(sl => fix('filament', sl));
+  // eski sürümlerden kalan ayarları düzelt (bir kez)
+  if ((s.migr || 0) < 1) {
+    if (s.printer.values.startGcode === OLD_START_GCODE) s.printer.values.startGcode = START_GCODE; // gereksiz nozul ısıtma döngüsü
+    s.slots.forEach(sl => { // yan fan hiç çalışmıyordu: sistem profillerinde yeni varsayılan
+      const pre = CATEGORIES.filament.presets[sl.name];
+      if (pre && pre.auxFan > 0 && !(sl.values.auxFan > 0)) sl.values.auxFan = pre.auxFan;
+    });
+    s.migr = 1;
+  }
   if (!s.flush || !Array.isArray(s.flush.m)) s.flush = { on: true, auto: true, mult: 1, m: null };
   if (s.flush.auto || !s.flush.m) s.flush.m = autoFlush(s.slots);
   return s;

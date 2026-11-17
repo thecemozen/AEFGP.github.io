@@ -10,8 +10,14 @@
  */
 
 // ------------------------------------------------------------------ G-code şablonları
-export const START_GCODE = `M140 S{bed_first}
+// K1 START_PRINT nozulu önce düşük sıcaklıkta tutar (nozul temizleme ve seviyeleme), sonra baskı sıcaklığına çıkar.
+// Öncesinde nozulu baskı sıcaklığına ısıtmak gereksiz bir ısınıp soğuma döngüsü ekler; yalnızca tabla önceden ısınır.
+export const OLD_START_GCODE = `M140 S{bed_first}
 M104 S{nozzle_first}
+START_PRINT EXTRUDER_TEMP={nozzle_first} BED_TEMP={bed_first}
+M190 S{bed_first}
+M109 S{nozzle_first}`;
+export const START_GCODE = `M140 S{bed_first}
 START_PRINT EXTRUDER_TEMP={nozzle_first} BED_TEMP={bed_first}
 M190 S{bed_first}
 M109 S{nozzle_first}`;
@@ -120,7 +126,7 @@ export const FILAMENT_SCHEMA = [
     { k: 'fanMax', l: 'Parça fanı (maks)', u: '%', t: 'n', min: 0, max: 100, s: 1 },
     { k: 'bridgeFan', l: 'Köprü fanı', u: '%', t: 'n', min: 0, max: 100, s: 1 },
     { k: 'overhangFan', l: 'Çıkıntı fanı', u: '%', t: 'n', min: 0, max: 100, s: 1 },
-    { k: 'auxFan', l: 'Yan (yardımcı) fan', u: '%', t: 'n', min: 0, max: 100, s: 5, tip: 'K1 Max yan fanı (M106 P2).' },
+    { k: 'auxFan', l: 'Yan (yardımcı) fan', u: '%', t: 'n', min: 0, max: 100, s: 5, tip: 'K1 Max yan fanı (M106 P2). Fanın kapalı olduğu ilk katmanlardan sonra açılır. PLA için %70; PETG/ABS/ASA için kapalı (katman yapışması zayıflar).' },
     { k: 'chamberFan', l: 'Kasa (egzoz) fanı', u: '%', t: 'n', min: 0, max: 100, s: 5, tip: 'M106 P3. ABS/ASA için kapalı tutun.' },
     { k: 'minLayerTime', l: 'Min. katman süresi', u: 'sn', t: 'n', min: 0, max: 60, s: 1, tip: 'Küçük katmanlar bu süreden kısa sürerse yavaşlatılır.' },
     { k: 'minSpeed', l: 'Yavaşlatmada min. hız', u: 'mm/s', t: 'n', min: 5, max: 100, s: 1 },
@@ -151,11 +157,11 @@ const FIL_BASE = {
 export const FILAMENT_BASE = FIL_BASE;
 
 export const FILAMENT_PRESETS = {
-  'Genel PLA': {},
-  'Hyper PLA': { nozzleTempFirst: 230, nozzleTemp: 230, maxVolumetric: 30, pressureAdvance: 0.035, minLayerTime: 5, cost: 750 },
-  'PLA Mat': { nozzleTempFirst: 220, nozzleTemp: 215, maxVolumetric: 18, flowRatio: 0.98, cost: 750 },
-  'PLA Silk': { nozzleTempFirst: 225, nozzleTemp: 225, maxVolumetric: 12, flowRatio: 0.98, cost: 850 },
-  'PLA-CF': { filamentType: 'PLA-CF', filamentDensity: 1.21, nozzleTempFirst: 230, nozzleTemp: 230, maxVolumetric: 15, pressureAdvance: 0.03, flowRatio: 0.96, cost: 1300 },
+  'Genel PLA': { auxFan: 70 },
+  'Hyper PLA': { auxFan: 70, nozzleTempFirst: 230, nozzleTemp: 230, maxVolumetric: 30, pressureAdvance: 0.035, minLayerTime: 5, cost: 750 },
+  'PLA Mat': { auxFan: 70, nozzleTempFirst: 220, nozzleTemp: 215, maxVolumetric: 18, flowRatio: 0.98, cost: 750 },
+  'PLA Silk': { auxFan: 50, nozzleTempFirst: 225, nozzleTemp: 225, maxVolumetric: 12, flowRatio: 0.98, cost: 850 },
+  'PLA-CF': { auxFan: 70, filamentType: 'PLA-CF', filamentDensity: 1.21, nozzleTempFirst: 230, nozzleTemp: 230, maxVolumetric: 15, pressureAdvance: 0.03, flowRatio: 0.96, cost: 1300 },
   'Genel PETG': { filamentType: 'PETG', filamentDensity: 1.27, flowRatio: 0.96, pressureAdvance: 0.06, maxVolumetric: 12,
     nozzleTempFirst: 240, nozzleTemp: 240, bedTempFirst: 70, bedTemp: 70, fanOffLayers: 2, fanFullLayer: 4, fanMin: 30, fanMax: 50, bridgeFan: 70,
     minLayerTime: 8, retractLength: 1.0, retractSpeed: 30, deretractSpeed: 30, zHop: 0.4, cost: 750 },
@@ -172,7 +178,7 @@ export const FILAMENT_PRESETS = {
     nozzleTempFirst: 265, nozzleTemp: 260, bedTempFirst: 100, bedTemp: 100, fanOffLayers: 3, fanFullLayer: 6, fanMin: 0, fanMax: 25, bridgeFan: 40,
     minLayerTime: 10, cost: 900 },
   'TPU 95A': { filamentType: 'TPU', filamentDensity: 1.21, flowRatio: 1.0, pressureAdvance: 0.1, maxVolumetric: 3.6,
-    nozzleTempFirst: 230, nozzleTemp: 230, bedTempFirst: 45, bedTemp: 45, fanMin: 80, fanMax: 100, minLayerTime: 8,
+    nozzleTempFirst: 230, nozzleTemp: 230, bedTempFirst: 45, bedTemp: 45, fanMin: 80, fanMax: 100, auxFan: 50, minLayerTime: 8,
     retractLength: 0.4, retractSpeed: 20, deretractSpeed: 20, zHop: 0, cost: 1100 },
 };
 
