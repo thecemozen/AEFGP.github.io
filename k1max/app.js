@@ -39,7 +39,7 @@ function toBlob(text, id) {
 }
 
 // ================================================================= durum ve profiller
-const APP_VERSION = '2.27';
+const APP_VERSION = '2.28';
 const DEVICE_KEYS = ['hostIp', 'hostPort', 'apiKey', 'startLineInfo'];
 const FAST_PRESET = 'Hızlı baskı (uyarlanabilir 0.10–0.28)';
 let state = null;
@@ -849,6 +849,7 @@ function showPanel(name) {
   $('tbPanel').hidden = !tbPanel;
   if (tbPanel) $('tbPanel').dataset.show = tbPanel;
   renderEditTools();
+  if (typeof refreshPaintOverlays === 'function') refreshPaintOverlays();
 }
 function renderEditTools() {
   const o = editTarget() || objects[0];
@@ -992,7 +993,8 @@ function cloneObject(o) {
   objParts(o).forEach(p => {
     const mesh = new THREE.Mesh(new THREE.BufferGeometry(), partMaterial(p.slot));
     partsGroup.add(mesh);
-    parts.push({ name: p.name, geom: p.geom.clone(), slot: p.slot, mesh, flowMul: p.flowMul, obj: c, role: p.role });
+    parts.push({ name: p.name, geom: p.geom.clone(), slot: p.slot, mesh, flowMul: p.flowMul, obj: c, role: p.role, paint: p.paint ? Object.fromEntries(Object.entries(p.paint).filter(([, a]) => a).map(([k, a]) => [k, a.slice()])) : undefined });
+    updatePaintOverlay(parts[parts.length - 1]);
   });
   return c;
 }
@@ -1175,6 +1177,7 @@ function pickObject() {
   return best;
 }
 wrap.addEventListener('pointerdown', (e) => {
+  if (tbPanel === 'paint') return;   // boyama kipinde sürükleme yok (aşağıdaki boyama dinleyicisi)
   if (e.target !== renderer.domElement || !parts.length || !partsGroup.visible || e.button > 0) return;
   setNdc(e); syncOrtho(); picker.setFromCamera(ndc, activeCam());
   const o = pickObject();
@@ -1455,7 +1458,7 @@ async function saveProject() {
   const live = objects.filter(o => objParts(o).length);
   const blob = await writeProject({
     objects: live,
-    parts: parts.map(p => ({ name: p.name, positions: p.geom.attributes.position.array, slot: p.slot, flowMul: p.flowMul, obj: live.indexOf(p.obj), role: p.role })),
+    parts: parts.map(p => ({ name: p.name, positions: p.geom.attributes.position.array, slot: p.slot, flowMul: p.flowMul, obj: live.indexOf(p.obj), role: p.role, paint: jobPaint(p) })),
     settings: { printer: state.printer, process: state.process, slots: state.slots, flush: state.flush },
     app: { name: 'K1MaxDilimleyici', version: APP_VERSION },
   });
@@ -1477,7 +1480,8 @@ async function loadProject(proj, fileName, replace) {
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(p.positions, 3));
     const slot = Math.min(SLOT_COUNT - 1, Math.max(0, p.slot));
     const mesh = new THREE.Mesh(new THREE.BufferGeometry(), partMaterial(slot)); partsGroup.add(mesh);
-    parts.push({ name: p.name, geom: g, slot, mesh, flowMul: p.flowMul, obj: o, role: p.role === 'negative' ? 'negative' : undefined });
+    parts.push({ name: p.name, geom: g, slot, mesh, flowMul: p.flowMul, obj: o, role: p.role === 'negative' ? 'negative' : undefined, paint: p.paint || undefined });
+    if (p.paint) updatePaintOverlay(parts[parts.length - 1]);
   });
   objects = objects.filter(o => objParts(o).length);
   if (!replace) objs.forEach(o => placeFree(o));
@@ -1654,10 +1658,16 @@ const TYPE_INFO = [
 ];
 const PV = 11;
 
+function jobPaint(p) {
+  if (!p.paint || p.role === 'negative') return undefined;
+  const out = {}; let any = false;
+  ['seam', 'support', 'color'].forEach(m => { const a = paintArr(p, m, false); if (a && a.some(v => v)) { out[m] = a.slice(); any = true; } });
+  return any ? out : undefined;
+}
 function buildJob() {
   const S = Object.assign({}, state.printer.values, state.process.values);
   const fils = state.slots.map(sl => Object.assign({}, sl.values, { color: sl.color, name: sl.name }));
-  const jobParts = parts.map(p => ({ name: p.name, slot: p.slot, flowMul: p.flowMul || 1, positions: worldGeom(p).attributes.position.array, role: p.role,
+  const jobParts = parts.map(p => ({ name: p.name, slot: p.slot, flowMul: p.flowMul || 1, positions: worldGeom(p).attributes.position.array, role: p.role, paint: jobPaint(p),
     ranges: p.obj && p.obj.ranges && p.obj.ranges.length ? p.obj.ranges.map(r => ({ z0: r.z0, z1: r.z1, S: r.S })) : undefined }));
   const F = state.flush;
   const job = { parts: jobParts, S, fils, flush: F && F.on ? F.m.map(row => row.map(v => Math.max(0, v * F.mult))) : null };
@@ -2911,3 +2921,121 @@ $('objText').addEventListener('click', async () => {
   placeAll(); clearPreview(); renderParts(); renderObj(); focusModels();
   toast('Yazı eklendi.');
 });
+
+// ================================================================= boyama: dikiş, destek, renk (Orca: seam / support / color painting)
+// Boya, parça geometrisinin üçgen sırasına göre tutulur: p.paint = { seam, support, color } (Uint8Array, üçgen başına).
+// dikiş/destek: 1 = zorunlu, 2 = engelle; renk: yuva + 1. 0 = boyasız.
+const PAINT = { mode: 'color', val: 2, size: 3, fill: false };
+const PAINT_COLORS = { seam: { 1: '#ffd400', 2: '#7a3cff' }, support: { 1: '#18c964', 2: '#e5484d' } };
+function paintArr(p, mode, create) {
+  const nT = p.geom.attributes.position.count / 3;
+  p.paint = p.paint || {};
+  let a = p.paint[mode];
+  if (a && a.length !== nT) a = p.paint[mode] = null;   // geometri değişti: boya geçersiz
+  if (!a && create) a = p.paint[mode] = new Uint8Array(nT);
+  return a;
+}
+function paintColor(mode, v) { return mode === 'color' ? (state.slots[v - 1] ? state.slots[v - 1].color : '#ff00ff') : PAINT_COLORS[mode][v]; }
+function updatePaintOverlay(p) {
+  if (p.paintMesh) { p.mesh.remove(p.paintMesh); p.paintMesh.geometry.dispose(); p.paintMesh = null; }
+  if (p.role === 'negative' || !p.paint) return;
+  const modes = ['color']; if (tbPanel === 'paint' && PAINT.mode !== 'color') modes.push(PAINT.mode);
+  const pos = p.geom.attributes.position.array, nT = pos.length / 9, val = new Uint8Array(nT), md = new Uint8Array(nT);
+  let n = 0;
+  modes.forEach((m, mi) => { const a = paintArr(p, m, false); if (!a) return; for (let t = 0; t < nT; t++) if (a[t]) { if (!val[t]) n++; val[t] = a[t]; md[t] = mi; } });
+  if (!n) return;
+  const P = new Float32Array(n * 9), C = new Float32Array(n * 9), col = new THREE.Color();
+  let k = 0;
+  for (let t = 0; t < nT; t++) {
+    if (!val[t]) continue;
+    col.set(paintColor(modes[md[t]], val[t]));
+    for (let j = 0; j < 9; j++) P[k * 9 + j] = pos[t * 9 + j];
+    for (let j = 0; j < 3; j++) { C[k * 9 + j * 3] = col.r; C[k * 9 + j * 3 + 1] = col.g; C[k * 9 + j * 3 + 2] = col.b; }
+    k++;
+  }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(P, 3)); g.setAttribute('color', new THREE.BufferAttribute(C, 3)); g.computeVertexNormals();
+  p.paintMesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+  p.mesh.add(p.paintMesh);
+}
+function refreshPaintOverlays() { parts.forEach(updatePaintOverlay); wake(2); }
+function renderPaintVals() {
+  const box = $('ptVals'); box.innerHTML = '';
+  const opts = PAINT.mode === 'color' ? state.slots.map((s2, i) => [i + 1, `<span class="sw" style="background:${s2.color}"></span>${i + 1}`]) : [[1, `<span class="sw" style="background:${PAINT_COLORS[PAINT.mode][1]}"></span>Zorunlu`], [2, `<span class="sw" style="background:${PAINT_COLORS[PAINT.mode][2]}"></span>Engelle`]];
+  opts.push([0, 'Sil']);
+  if (!opts.some(o => o[0] === PAINT.val)) PAINT.val = opts[0][0];
+  opts.forEach(([v, html]) => { const b = document.createElement('button'); b.innerHTML = html; b.className = PAINT.val === v ? 'on' : ''; b.onclick = () => { PAINT.val = v; renderPaintVals(); }; box.appendChild(b); });
+  $('ptHint').textContent = (PAINT.mode === 'color' ? 'Boyanan yüzey seçilen CFS yuvasıyla basılır (renk derinliği: İşlem > Boyama). ' : PAINT.mode === 'seam' ? 'Zorunlu: dikiş buraya gelir. Engelle: dikiş buraya gelmez. ' : 'Zorunlu: destek ayarı kapalı olsa da burada destek oluşur. Engelle: burada destek oluşmaz. ') +
+    'Sürükleyerek boyayın; döndürmek için sağ tık (dokunmatikte iki parmak).';
+}
+$('ptMode').addEventListener('change', () => { PAINT.mode = $('ptMode').value; PAINT.val = PAINT.mode === 'color' ? 2 : 1; renderPaintVals(); refreshPaintOverlays(); });
+$('ptSize').addEventListener('input', () => { PAINT.size = +$('ptSize').value; $('ptSizeV').textContent = PAINT.size; });
+$('ptFill').addEventListener('change', () => { PAINT.fill = $('ptFill').checked; });
+$('ptClear').addEventListener('click', () => {
+  const list = selObj ? objParts(selObj) : parts;
+  list.forEach(p => { if (p.paint) p.paint[PAINT.mode] = null; });
+  refreshPaintOverlays(); clearPreview();
+});
+renderPaintVals();
+// düz yüzeyi doldurma için komşuluk (aynı köşeyi paylaşan üçgenler)
+function triAdjacency(p) {
+  const pos = p.geom.attributes.position.array, key = (i) => Math.round(pos[i] * 1e3) + ',' + Math.round(pos[i + 1] * 1e3) + ',' + Math.round(pos[i + 2] * 1e3);
+  if (p._adj && p._adj.v === p.geom.attributes.position.version) return p._adj;
+  const byV = new Map(), nT = pos.length / 9;
+  for (let t = 0; t < nT; t++) for (let j = 0; j < 3; j++) { const k = key(t * 9 + j * 3); let l = byV.get(k); if (!l) byV.set(k, l = []); l.push(t); }
+  const vk = (t, j) => key(t * 9 + j * 3);
+  p._adj = { v: p.geom.attributes.position.version, byV, vk };
+  return p._adj;
+}
+function triNormal(pos, t, out) {
+  const o = t * 9, ux = pos[o + 3] - pos[o], uy = pos[o + 4] - pos[o + 1], uz = pos[o + 5] - pos[o + 2], vx = pos[o + 6] - pos[o], vy = pos[o + 7] - pos[o + 1], vz = pos[o + 8] - pos[o + 2];
+  out.set(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx).normalize(); return out;
+}
+let painting = null;
+function paintAt(e) {
+  setNdc(e); syncOrtho(); picker.setFromCamera(ndc, activeCam());
+  const meshes = parts.filter(p => p.role !== 'negative').map(p => p.mesh);
+  const h = picker.intersectObjects(meshes, false)[0];
+  if (!h) return false;
+  const p = parts.find(q => q.mesh === h.object); if (!p) return false;
+  const a = paintArr(p, PAINT.mode, true), pos = p.geom.attributes.position.array, nT = pos.length / 9, v = PAINT.val;
+  if (PAINT.fill) {
+    const adj = triAdjacency(p), n0 = triNormal(pos, h.faceIndex, new THREE.Vector3()), n1 = new THREE.Vector3(), seen = new Uint8Array(nT), st = [h.faceIndex];
+    seen[h.faceIndex] = 1;
+    while (st.length) {
+      const t = st.pop(); a[t] = v;
+      for (let j = 0; j < 3; j++) (adj.byV.get(adj.vk(t, j)) || []).forEach(u => { if (!seen[u]) { seen[u] = 1; if (triNormal(pos, u, n1).dot(n0) > 0.985) st.push(u); } });
+    }
+  } else {
+    const loc = p.mesh.worldToLocal(h.point.clone()), o = p.obj;
+    const sx = 1 / (o.sx * o.sx), sy = 1 / (o.sy * o.sy), sz = 1 / (o.sz * o.sz), r2 = PAINT.size * PAINT.size;
+    // ölçekli uzaklık: yerel farkı dünya ölçüsüne çevir
+    const d2 = (x, y, z) => { const dx = (x - loc.x) * o.sx, dy = (y - loc.y) * o.sy, dz = (z - loc.z) * o.sz; return dx * dx + dy * dy + dz * dz; };
+    void sx; void sy; void sz;
+    for (let t = 0; t < nT; t++) {
+      const k = t * 9;
+      const cx = (pos[k] + pos[k + 3] + pos[k + 6]) / 3, cy = (pos[k + 1] + pos[k + 4] + pos[k + 7]) / 3, cz = (pos[k + 2] + pos[k + 5] + pos[k + 8]) / 3;
+      if (d2(cx, cy, cz) <= r2 || d2(pos[k], pos[k + 1], pos[k + 2]) <= r2 || d2(pos[k + 3], pos[k + 4], pos[k + 5]) <= r2 || d2(pos[k + 6], pos[k + 7], pos[k + 8]) <= r2) a[t] = v;
+    }
+    a[h.faceIndex] = v;
+  }
+  if (painting) painting.parts.add(p);
+  updatePaintOverlay(p); wake(2);
+  return true;
+}
+wrap.addEventListener('pointerdown', (e) => {
+  if (tbPanel !== 'paint') return;
+  if (painting) { painting = null; return; }        // ikinci parmak: boyamayı bırak, görünüm hareketi olsun
+  if (e.target !== renderer.domElement || !parts.length || !partsGroup.visible || e.button > 0) return;
+  painting = { id: e.pointerId, parts: new Set() };
+  if (!paintAt(e)) { painting = null; return; }
+  renderer.domElement.setPointerCapture(e.pointerId);
+  e.stopImmediatePropagation(); e.preventDefault();
+}, true);
+wrap.addEventListener('pointermove', (e) => {
+  if (!painting || e.pointerId !== painting.id) return;
+  paintAt(e); e.stopImmediatePropagation();
+}, true);
+wrap.addEventListener('pointerup', (e) => {
+  if (!painting || e.pointerId !== painting.id) return;
+  painting = null; clearPreview(); e.stopImmediatePropagation();
+}, true);

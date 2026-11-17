@@ -353,6 +353,7 @@ export const PROCESS_SCHEMA = [
     { k: 'skirtDistance', l: 'Etek mesafesi', u: 'mm', t: 'n', min: 0, max: 50, s: 0.5 },
     { k: 'skirtHeight', l: 'Etek yüksekliği', u: 'katman', t: 'n', min: 1, max: 50, s: 1, adv: true },
     { k: 'brimWidth', l: 'Kenarlık genişliği', u: 'mm', t: 'n', min: 0, max: 30, s: 0.5 },
+    { k: 'paintDepth', l: 'Renk boyası derinliği', u: 'mm', t: 'n', min: 0.4, max: 5, s: 0.1, adv: true, tip: 'Fırçayla renk boyanan yüzeylerin içe (ve üst/alt yüzeylerde yukarı-aşağı) ne kadar o renkle basılacağı. Dış duvarın tamamen o renkte görünmesi için en az duvar kalınlığı kadar olmalı.' },
     { k: 'brimType', l: 'Kenarlık türü', t: 's', o: { outer: 'Dış kenar boyunca', ears: 'Fare kulağı (yalnızca köşelerde)' }, tip: 'Fare kulağı: yalnızca keskin köşelere yuvarlak kenarlık basılır (Orca: mouse ear). Köşe kalkmasını önler, sökmesi kolaydır, daha az filament harcar.' },
     { k: 'brimEarAngle', l: 'Kulak için köşe açısı', u: '°', t: 'n', min: 30, max: 175, s: 5, adv: true, tip: 'Bu açıdan daha keskin köşelere kulak eklenir.' },
     { k: 'draftShield', l: 'Rüzgar kalkanı', t: 'b', tip: 'Etek, modelin tüm yüksekliği boyunca ince bir duvar olarak basılır (Orca: draft shield). Hava akımına ve soğumaya hassas ABS/ASA baskılarında çatlak ve kalkmayı azaltır. Etek tur sayısı en az 1 olarak kullanılır.' },
@@ -379,7 +380,7 @@ export const PROCESS_SCHEMA = [
 ];
 
 export const PROCESS_BASE = {
-  layerHeight: 0.2, firstLayerHeight: 0.2, resolution: 0.0125, sliceMode: 'regular', smoothCurves: false, polyholes: false, arcFitting: false, smallAreaFlowComp: false, extraPerimetersOverhang: false, overhangReverse: false, makeOverhangPrintable: false, makeOverhangAngle: 55, supportIroning: false, brimType: 'outer', brimEarAngle: 125, draftShield: false, fuzzySkin: 'none', fuzzyThickness: 0.3, fuzzyPointDist: 0.8, thinWalls: true, onlyOneWallTop: true, smallPerimeterSpeed: 50, smallPerimeterThreshold: 6.5, adaptiveLayers: false, adaptiveMinH: 0.08, adaptiveMaxH: 0.28, adaptiveQuality: 50,
+  layerHeight: 0.2, firstLayerHeight: 0.2, resolution: 0.0125, sliceMode: 'regular', smoothCurves: false, polyholes: false, arcFitting: false, smallAreaFlowComp: false, extraPerimetersOverhang: false, overhangReverse: false, makeOverhangPrintable: false, makeOverhangAngle: 55, supportIroning: false, brimType: 'outer', paintDepth: 1.2, brimEarAngle: 125, draftShield: false, fuzzySkin: 'none', fuzzyThickness: 0.3, fuzzyPointDist: 0.8, thinWalls: true, onlyOneWallTop: true, smallPerimeterSpeed: 50, smallPerimeterThreshold: 6.5, adaptiveLayers: false, adaptiveMinH: 0.08, adaptiveMaxH: 0.28, adaptiveQuality: 50,
   lineWidth: 0.42, firstLayerLineWidth: 0.5, outerWallLineWidth: 0.42, innerWallLineWidth: 0.45, topLineWidth: 0.42,
   solidLineWidth: 0.42, sparseLineWidth: 0.45, supportLineWidth: 0.42,
   seam: 'corner', seamGap: 10, scarfSeam: 'none', scarfLength: 10, scarfStartHeight: 0,

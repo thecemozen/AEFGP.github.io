@@ -76,6 +76,27 @@ function objTransform(o) {
   return [c * o.sx, s * o.sx, 0, -s * o.sy, c * o.sy, 0, 0, 0, o.sz, o.x, o.y, 0].map(num).join(' ');
 }
 
+// Boya dizileri (üçgen başına bir değer) kısa tutulsun diye "değer:adet" çiftleriyle saklanır
+function rleEncode(paint) {
+  const out = {};
+  Object.keys(paint).forEach(k => {
+    const a = paint[k]; if (!a) return;
+    const r = []; let v = a[0], n = 0;
+    for (let i = 0; i < a.length; i++) { if (a[i] === v) n++; else { r.push(v + ':' + n); v = a[i]; n = 1; } }
+    r.push(v + ':' + n); out[k] = r.join(',');
+  });
+  return out;
+}
+function rleDecode(enc, nT) {
+  const out = {};
+  Object.keys(enc || {}).forEach(k => {
+    const a = new Uint8Array(nT); let i = 0;
+    String(enc[k]).split(',').forEach(pr => { const [v, n] = pr.split(':').map(Number); if (v) a.fill(v, i, Math.min(nT, i + n)); i += n; });
+    if (i === nT) out[k] = a;
+  });
+  return Object.keys(out).length ? out : undefined;
+}
+
 /**
  * Proje 3MF'sini oluşturur.
  * objects: [{ name, x, y, rotZ, sx, sy, sz, origin }]
@@ -94,7 +115,7 @@ export async function writeProject({ objects, parts, settings, app }) {
       res.push(`<object id="${mid}" type="model" name="${esc(p.name)}">${meshXml(p.positions)}</object>`);
       comps.push(`<component objectid="${mid}"/>`);
       cfgParts.push(`<part id="${k + 1}" subtype="${p.role === 'negative' ? 'negative_part' : 'normal_part'}"><metadata key="name" value="${esc(p.name)}"/><metadata key="extruder" value="${(p.slot || 0) + 1}"/></part>`);
-      meta.parts.push({ name: p.name, slot: p.slot || 0, flowMul: p.flowMul || 1, obj: mo, meshId: mid, role: p.role || undefined });
+      meta.parts.push({ name: p.name, slot: p.slot || 0, flowMul: p.flowMul || 1, obj: mo, meshId: mid, role: p.role || undefined, paint: p.paint ? rleEncode(p.paint) : undefined });
     });
     const gid = ++id;
     res.push(`<object id="${gid}" type="model" name="${esc(o.name)}"><components>${comps.join('')}</components></object>`);
@@ -130,7 +151,8 @@ export async function readProject(buffer) {
     if (!m) throw new Error('projede parça ağı eksik: ' + p.name);
     const pos = new Float32Array(m.t.length * 3);
     for (let i = 0; i < m.t.length; i++) { const v = m.t[i] * 3; pos[i * 3] = m.v[v]; pos[i * 3 + 1] = m.v[v + 1]; pos[i * 3 + 2] = m.v[v + 2]; }
-    parts.push({ name: p.name, positions: pos, slot: p.slot | 0, flowMul: +p.flowMul || 1, obj: p.obj | 0, role: p.role === 'negative' ? 'negative' : undefined });
+    parts.push({ name: p.name, positions: pos, slot: p.slot | 0, flowMul: +p.flowMul || 1, obj: p.obj | 0, role: p.role === 'negative' ? 'negative' : undefined,
+      paint: p.paint ? rleDecode(p.paint, m.t.length / 3) : undefined });
   }
   return { objects: meta.objects, parts, settings: meta.settings || null, app: meta.app };
 }

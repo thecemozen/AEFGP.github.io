@@ -1523,11 +1523,98 @@
   }
 
   // ---------------------------------------------------------------- 3) destekler
-  function computeSupports(U, layers, S, bed) {
+  // ---------------------------------------------------------------- boyama (dikiş, destek, renk)
+  // pos: dünya koordinatında üçgen dizisi (9 sayı/üçgen), arr: üçgen başına boya değeri
+  function layerRange(layers, zmin, zmax, mid) {
+    var nL = layers.length, lo = 0, hi = nL;
+    while (lo < hi) { var m = (lo + hi) >> 1; var zz = mid ? layers[m].z - layers[m].h / 2 : layers[m].z; if (zz < zmin) lo = m + 1; else hi = m; }
+    var a = lo; lo = a; hi = nL;
+    while (lo < hi) { var m2 = (lo + hi) >> 1; var z2 = mid ? layers[m2].z - layers[m2].h / 2 : layers[m2].z - layers[m2].h; if (z2 <= zmax) lo = m2 + 1; else hi = m2; }
+    return [a, lo];
+  }
+  // Boyalı üçgenlerin katman orta düzlemiyle kesişim parçaları: katman başına [[x1, y1], [x2, y2]] listesi
+  function paintSegs(pos, arr, val, layers) {
+    var out = layers.map(function () { return []; });
+    for (var t = 0; t < arr.length; t++) {
+      if (arr[t] !== val) continue;
+      var o = t * 9, P = [[pos[o], pos[o + 1], pos[o + 2]], [pos[o + 3], pos[o + 4], pos[o + 5]], [pos[o + 6], pos[o + 7], pos[o + 8]]];
+      var zmin = Math.min(P[0][2], P[1][2], P[2][2]), zmax = Math.max(P[0][2], P[1][2], P[2][2]);
+      var rg = layerRange(layers, zmin, zmax, true);
+      for (var li = rg[0]; li < rg[1]; li++) {
+        var zc = layers[li].z - layers[li].h / 2, pts = [];
+        for (var e = 0; e < 3; e++) {
+          var A = P[e], B = P[(e + 1) % 3];
+          if ((A[2] - zc) * (B[2] - zc) < 0) { var k = (zc - A[2]) / (B[2] - A[2]); pts.push([A[0] + (B[0] - A[0]) * k, A[1] + (B[1] - A[1]) * k]); }
+        }
+        if (pts.length === 2) out[li].push(pts);
+      }
+    }
+    return out;
+  }
+  // Yataya yakın boyalı üçgenlerin XY izdüşümü, z ± dz aralığındaki katmanlara (renk boyamada üst/alt yüzeyler)
+  function paintFlat(pos, arr, val, layers, dz, flatOnly) {
+    var out = layers.map(function () { return []; });
+    for (var t = 0; t < arr.length; t++) {
+      if (arr[t] !== val) continue;
+      var o = t * 9;
+      var ux = pos[o + 3] - pos[o], uy = pos[o + 4] - pos[o + 1], uz = pos[o + 5] - pos[o + 2], vx = pos[o + 6] - pos[o], vy = pos[o + 7] - pos[o + 1], vz = pos[o + 8] - pos[o + 2];
+      var nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx, nl = Math.hypot(nx, ny, nz) || 1;
+      if (flatOnly && Math.abs(nz / nl) < 0.5) continue;
+      var zmin = Math.min(pos[o + 2], pos[o + 5], pos[o + 8]) - dz, zmax = Math.max(pos[o + 2], pos[o + 5], pos[o + 8]) + dz;
+      var tri = [{ X: Math.round(pos[o] * SCALE), Y: Math.round(pos[o + 1] * SCALE) }, { X: Math.round(pos[o + 3] * SCALE), Y: Math.round(pos[o + 4] * SCALE) }, { X: Math.round(pos[o + 6] * SCALE), Y: Math.round(pos[o + 7] * SCALE) }];
+      if (Math.abs(CL.Clipper.Area(tri)) < 1) continue;
+      if (CL.Clipper.Area(tri) < 0) tri.reverse();
+      var rg = layerRange(layers, zmin, zmax, false);
+      for (var li = rg[0]; li < rg[1]; li++) out[li].push(tri);
+    }
+    return out;
+  }
+  function offsetOpen(lines, r) {
+    if (!lines.length) return [];
+    var co = new CL.ClipperOffset(2, 0.01 * SCALE), sol = new CL.Paths();
+    co.AddPaths(lines.map(function (l) { return l.map(function (q) { return { X: Math.round(q[0] * SCALE), Y: Math.round(q[1] * SCALE) }; }); }), CL.JoinType.jtRound, CL.EndType.etOpenRound);
+    co.Execute(sol, r * SCALE);
+    return sol;
+  }
+  // Dikiş boyası: önce zorunlu dikiş noktasına en yakın kenar noktasından başla; yoksa yasaklı bölgeden kaç
+  function seamPaint(pts, E, B) {
+    if ((!E || !E.length) && (!B || !B.length)) return pts;
+    var ring = pts.slice(0, -1), n = ring.length, tol = 2.0, i, j;
+    if (n < 3) return pts;
+    if (E && E.length) {
+      var bd = tol * tol, bi = -1, bq = null;
+      for (i = 0; i < n; i++) {
+        var a = ring[i], b = ring[(i + 1) % n], dx = b[0] - a[0], dy = b[1] - a[1], L = dx * dx + dy * dy || 1e-12;
+        for (j = 0; j < E.length; j++) {
+          var e = E[j], t = Math.max(0, Math.min(1, ((e[0] - a[0]) * dx + (e[1] - a[1]) * dy) / L)), qx = a[0] + dx * t, qy = a[1] + dy * t, d = (qx - e[0]) * (qx - e[0]) + (qy - e[1]) * (qy - e[1]);
+          if (d < bd) { bd = d; bi = i; bq = [qx, qy, t]; }
+        }
+      }
+      if (bi >= 0) {
+        var r2;
+        if (bq[2] < 1e-3) r2 = ring.slice(bi).concat(ring.slice(0, bi));
+        else if (bq[2] > 1 - 1e-3) { var k2 = (bi + 1) % n; r2 = ring.slice(k2).concat(ring.slice(0, k2)); }
+        else r2 = [[bq[0], bq[1]]].concat(ring.slice(bi + 1), ring.slice(0, bi + 1));
+        r2.push(r2[0]); return r2;
+      }
+    }
+    if (B && B.length) {
+      var blocked = function (p) { for (var q = 0; q < B.length; q++) if (Math.abs(B[q][0] - p[0]) < tol && Math.abs(B[q][1] - p[1]) < tol && Math.hypot(B[q][0] - p[0], B[q][1] - p[1]) < tol) return true; return false; };
+      if (!blocked(ring[0])) return pts;
+      for (var k = 1; k <= n / 2; k++) {
+        var c = blocked(ring[k]) ? (blocked(ring[n - k]) ? -1 : n - k) : k;
+        if (c >= 0) { var r3 = ring.slice(c).concat(ring.slice(0, c)); r3.push(r3[0]); return r3; }
+      }
+    }
+    return pts;
+  }
+
+  function computeSupports(U, layers, S, bed, paint) {
     var nL = layers.length;
     var sup = [], iface = [];
     for (var i = 0; i < nL; i++) { sup.push([]); iface.push([]); }
-    if (!S.supportEnable || nL < 3) return { sup: sup, iface: iface };
+    var enf = paint && paint.enf, blk = paint && paint.blk, anyEnf = !!(enf && enf.some(function (l) { return l.length; }));
+    if ((!S.supportEnable && !anyEnf) || nL < 3) return { sup: sup, iface: iface };
     var h = S.layerHeight;
     var ang = Math.max(1, Math.min(89, S.supportAngle)) * Math.PI / 180;
     var gapTop = Math.max(0, Math.round(S.supportTopZ / h));
@@ -1535,8 +1622,14 @@
     var xy = S.supportXY;
     var ov = [[]];
     for (var li = 1; li < nL; li++) {
+      if (!S.supportEnable) { ov.push([]); continue; }   // yalnızca boyanan zorunlu destekler
       var o = difference(U[li], offset(U[li - 1], layers[li].h / Math.tan(ang), false)); // değişken katmanda katmanın kendi yüksekliği
       ov.push(opening(o, S.W.support * 1.5));
+    }
+    // Destek boyası (Orca: support enforcer / blocker)
+    if (enf || blk) for (li = 1; li < nL; li++) {
+      if (enf && enf[li] && enf[li].length) ov[li] = union(ov[li].concat(offset(union(enf[li]), 0.3, false)));
+      if (blk && blk[li] && blk[li].length && ov[li].length) ov[li] = difference(ov[li], offset(union(blk[li]), 1.5, false));
     }
     if (S.supportType === 'tree') return treeSupports(U, layers, S, bed, ov, gapTop, gapBot);
     var P = [];
@@ -2122,8 +2215,10 @@
     out.push('SET_VELOCITY_LIMIT SQUARE_CORNER_VELOCITY=' + S.squareCornerVelocity);
     out.push('SET_PRINT_STATS_INFO TOTAL_LAYER=' + nL);
     if (S.labelObjects) {
+      var defd = {};
       parts.forEach(function (p, i) {
         var bb = p.bbox;
+        if (defd[p.label]) return; defd[p.label] = 1;   // renk boyası sanal parçaları aynı nesnedir
         out.push('EXCLUDE_OBJECT_DEFINE NAME=' + p.label + ' CENTER=' + f3((bb.minX + bb.maxX) / 2) + ',' + f3((bb.minY + bb.maxY) / 2) +
           ' POLYGON=[[' + f3(bb.minX) + ',' + f3(bb.minY) + '],[' + f3(bb.maxX) + ',' + f3(bb.minY) + '],[' + f3(bb.maxX) + ',' + f3(bb.maxY) + '],[' + f3(bb.minX) + ',' + f3(bb.maxY) + ']]');
         void i;
@@ -2452,6 +2547,7 @@
             if (per <= smallLen) baseSp = Math.max(S.minSpeedFloor || 20, wallSp * num(S.smallPerimeterSpeed, 100) / 100);
           }
           var pts = loopFrom(paths[b], seam, near, bedCx);
+          if (job.seamE) pts = seamPaint(pts, job.seamE[li], job.seamB[li]);
           if (wallRev) pts.reverse(); // kapalı döngü: başlangıç (dikiş) noktası aynı kalır
           if (S.fuzzySkin && S.fuzzySkin !== 'none' && !first && (isOuter || S.fuzzySkin === 'all')) pts = fuzzLoop(pts);
           if (isOuter) lastSeam = pts[0];
@@ -2582,7 +2678,7 @@
     // Başlık bloğu: Moonraker/Fluidd dilimleyiciyi "; generated by AD SÜRÜM on TARİH at SAAT" satırından tanır
     var now = new Date(), p2 = function (n) { return (n < 10 ? '0' : '') + n; };
     header.push('; HEADER_BLOCK_START');
-    header.push('; generated by K1MaxDilimleyici 2.27 on ' + now.getFullYear() + '-' + p2(now.getMonth() + 1) + '-' + p2(now.getDate()) +
+    header.push('; generated by K1MaxDilimleyici 2.28 on ' + now.getFullYear() + '-' + p2(now.getMonth() + 1) + '-' + p2(now.getDate()) +
       ' at ' + p2(now.getHours()) + ':' + p2(now.getMinutes()) + ':' + p2(now.getSeconds()));
     header.push('; total layer number: ' + nL);
     header.push('; HEADER_BLOCK_END', '');
@@ -2658,7 +2754,7 @@
     var fils = job.fils;
     var parts = job.parts.filter(function (p) { return p.positions && p.positions.length >= 9; }).map(function (p, i) {
       return { name: p.name || ('part' + i), label: 'part_' + i, slot: Math.max(0, Math.min(fils.length - 1, p.slot | 0)), mesh: indexMesh(p.positions), flowMul: +p.flowMul || 1,
-        negative: p.role === 'negative', ranges: Array.isArray(p.ranges) && p.ranges.length ? p.ranges.map(function (r) { return { z0: +r.z0 || 0, z1: +r.z1 || 0, S: r.S || {} }; }) : null };
+        negative: p.role === 'negative', pos: p.paint ? p.positions : null, paint: p.paint || null, ranges: Array.isArray(p.ranges) && p.ranges.length ? p.ranges.map(function (r) { return { z0: +r.z0 || 0, z1: +r.z1 || 0, S: r.S || {} }; }) : null };
     });
     if (!parts.some(function (p) { return !p.negative; })) throw new Error('Dilimlenecek model yok (yalnızca negatif parça var).');
     if (!parts.length) throw new Error('Dilimlenecek model yok.');
@@ -2683,6 +2779,43 @@
       }
       parts.forEach(function (p, i) { p.label = 'part_' + i; });
     }
+
+    // Boyama verisi: dikiş noktaları, destek zorlama/engelleme alanları, renk bölgeleri (sanal parçalar)
+    var seamE = null, seamB = null, supPaint = null;
+    parts.slice().forEach(function (p) {
+      var pt = p.paint; if (!pt) return;
+      var addPts = function (dst, segs) { segs.forEach(function (list, li) { list.forEach(function (sg) { dst[li].push(sg[0], sg[1], [(sg[0][0] + sg[1][0]) / 2, (sg[0][1] + sg[1][1]) / 2]); }); }); };
+      if (pt.seam) {
+        if (!seamE) { seamE = layers.map(function () { return []; }); seamB = layers.map(function () { return []; }); }
+        addPts(seamE, paintSegs(p.pos, pt.seam, 1, layers)); addPts(seamB, paintSegs(p.pos, pt.seam, 2, layers));
+      }
+      if (pt.support) {
+        if (!supPaint) supPaint = { enf: layers.map(function () { return []; }), blk: layers.map(function () { return []; }) };
+        [[1, supPaint.enf], [2, supPaint.blk]].forEach(function (vk) {
+          // katmanın alt ve üst düzlemi arasındaki üçgen dilimlerinin izdüşümü
+          paintFlat(p.pos, pt.support, vk[0], layers, 0, false).forEach(function (list, li) { list.forEach(function (tri) { vk[1][li].push(tri); }); });
+        });
+      }
+      if (pt.color) {
+        var vals = {}; for (var t = 0; t < pt.color.length; t++) if (pt.color[t]) vals[pt.color[t]] = 1;
+        var depth = Math.max(0.4, num(S.paintDepth, 1.2));
+        Object.keys(vals).map(Number).sort().forEach(function (v) {
+          var segs = paintSegs(p.pos, pt.color, v, layers), flat = paintFlat(p.pos, pt.color, v, layers, depth, true);
+          var vp = { name: p.name + ' (boya ' + v + ')', label: p.label, slot: Math.max(0, Math.min(fils.length - 1, v - 1)), flowMul: p.flowMul, ranges: p.ranges, outline: [] };
+          var any = false;
+          for (var li = 0; li < layers.length; li++) {
+            var reg = [];
+            if (segs[li].length) reg = offsetOpen(chainSegs(segs[li]), depth);
+            if (flat[li].length) reg = reg.concat(union(flat[li]));
+            var R = reg.length && p.outline[li].length ? intersect(p.outline[li], union(reg)) : [];
+            if (R.length) { p.outline[li] = difference(p.outline[li], R); any = true; }
+            vp.outline.push(R);
+          }
+          if (any) parts.splice(parts.indexOf(p) + 1, 0, vp);
+        });
+      }
+      p.pos = null;
+    });
 
     // Yazdırılamayan çıkıntıyı koniye çevir (Orca: make overhang printable): üst katmanın, eşik açısına göre
     // küçültülmüş hâli alt katmana eklenir; çıkıntının altı destek gerekmeden basılabilen bir koni olur
@@ -2733,7 +2866,7 @@
     });
 
     progress(0.62, 'Destekler hesaplanıyor');
-    var supports = computeSupports(U, layers, S, { x: S.bedX, y: S.bedY });
+    var supports = computeSupports(U, layers, S, { x: S.bedX, y: S.bedY }, supPaint);
 
     // Kullanılan yuvalar ve prime kulesi
     var used = {};
@@ -2776,7 +2909,7 @@
       U[0] = union(U[0].concat([rectPath(tx, ty, tx + size, ty + size)]));
     }
 
-    var job2 = { calib: job.calib || null, flush: job.flush || null, S: S, fils: fils, multi: multi, firstSlot: firstSlot, supportSlot: supportSlot, tower: tower, thumbnails: job.thumbnails || (job.thumbnail ? [job.thumbnail] : null),
+    var job2 = { seamE: seamE, seamB: seamB, calib: job.calib || null, flush: job.flush || null, S: S, fils: fils, multi: multi, firstSlot: firstSlot, supportSlot: supportSlot, tower: tower, thumbnails: job.thumbnails || (job.thumbnail ? [job.thumbnail] : null),
       U: U, skirt: skirtLoops(S, U[0], supports.sup[0].concat(supports.iface[0]), U) };
     // katman planları: paralel sürüm burada yardımcılara hesaplatır; eşzamanlı sürüm G-code yazılırken hesaplar
     yield { kind: 'plans', parts: parts, layers: layers, S: S, U: U, job: job2 };
