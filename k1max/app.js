@@ -39,7 +39,7 @@ function toBlob(text, id) {
 }
 
 // ================================================================= durum ve profiller
-const APP_VERSION = '2.23';
+const APP_VERSION = '2.24';
 const DEVICE_KEYS = ['hostIp', 'hostPort', 'apiKey', 'startLineInfo'];
 const FAST_PRESET = 'Hızlı baskı (uyarlanabilir 0.10–0.28)';
 let state = null;
