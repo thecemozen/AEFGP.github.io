@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#000000">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Prompter</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<video id="cam" autoplay playsinline muted></video>
+
+<div id="noCam" hidden>
+  <p id="noCamMsg">Kamera açılamadı.</p>
+  <button id="retryCam" class="pill">Kameraya izin ver</button>
+</div>
+
+<section id="prompter" aria-label="Metin">
+  <div id="script"></div>
+  <div id="grip" aria-label="Metin alanını boyutlandır"><span></span></div>
+</section>
+
+<div id="side">
+  <button id="flip" class="round" aria-label="Kamerayı çevir">
+    <svg viewBox="0 0 24 24"><path d="M4 9a8 8 0 0 1 14-3l2 2M20 15a8 8 0 0 1-14 3l-2-2M20 4v4h-4M4 20v-4h4"/></svg>
+  </button>
+  <div id="speedBox" aria-label="Hız">
+    <button id="faster" aria-label="Hızlandır">+</button>
+    <output id="speedOut">5</output>
+    <button id="slower" aria-label="Yavaşlat">−</button>
+  </div>
+</div>
+
+<div id="recBadge" hidden><i></i><span id="recTime">00:00</span></div>
+<div id="countdown" hidden></div>
+<div id="toast" hidden></div>
+
+<nav id="bar">
+  <button id="btnEdit" class="round" aria-label="Metni düzenle">
+    <svg viewBox="0 0 24 24"><path d="M5 6h14M5 11h14M5 16h8"/></svg>
+  </button>
+  <button id="btnRewind" class="round" aria-label="Başa sar">
+    <svg viewBox="0 0 24 24"><path d="M4 5v6h6M4.5 11A8 8 0 1 1 6 17"/></svg>
+  </button>
+  <button id="btnRec" aria-label="Kaydı başlat"><i></i></button>
+  <button id="btnPlay" class="round" aria-label="Metni oynat">
+    <svg id="icoPlay" viewBox="0 0 24 24"><path class="fill" d="M8 5l11 7-11 7z"/></svg>
+    <svg id="icoPause" viewBox="0 0 24 24" hidden><path class="fill" d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>
+  </button>
+  <button id="btnSettings" class="round" aria-label="Ayarlar">
+    <svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg>
+  </button>
+</nav>
+
+<!-- Metin düzenleyici -->
+<div id="editor" class="sheet full" hidden>
+  <header>
+    <button id="edClear" class="text">Temizle</button>
+    <h2>Metin</h2>
+    <button id="edDone" class="text strong">Bitti</button>
+  </header>
+  <textarea id="edText" placeholder="Okuyacağın metni buraya yaz ya da yapıştır…" spellcheck="false"></textarea>
+  <footer>
+    <button id="edPaste" class="pill ghost">Panodan yapıştır</button>
+    <span id="edCount"></span>
+  </footer>
+</div>
+
+<!-- Ayarlar -->
+<div id="settings" class="sheet" hidden>
+  <header>
+    <span></span>
+    <h2>Ayarlar</h2>
+    <button id="setDone" class="text strong">Bitti</button>
+  </header>
+  <label>Kaydırma hızı <output id="oSpeed"></output>
+    <input id="sSpeed" type="range" min="1" max="15" step="1">
+  </label>
+  <label>Yazı boyutu <output id="oFont"></output>
+    <input id="sFont" type="range" min="16" max="60" step="1">
+  </label>
+  <label id="zoomRow" hidden>Kamera yakınlaştırma <output id="oZoom"></output>
+    <input id="sZoom" type="range">
+  </label>
+  <label class="row">Geri sayım
+    <select id="sCount">
+      <option value="0">Kapalı</option>
+      <option value="3">3 sn</option>
+      <option value="5">5 sn</option>
+      <option value="10">10 sn</option>
+    </select>
+  </label>
+  <label class="row">Metni aynala
+    <input id="sMirror" type="checkbox">
+  </label>
+  <p class="hint">İpucu: metne dokunarak durdur/başlat, sürükleyerek ileri-geri al. Metin alanının altındaki çizgiyi sürükleyerek boyutunu değiştir.</p>
+</div>
+
+<!-- Kayıt sonucu -->
+<div id="result" class="sheet" hidden>
+  <header>
+    <button id="resDiscard" class="text">Sil</button>
+    <h2>Kayıt hazır</h2>
+    <span></span>
+  </header>
+  <video id="resVideo" controls playsinline></video>
+  <div class="actions">
+    <a id="resSave" class="pill">Cihaza kaydet</a>
+    <button id="resShare" class="pill ghost" hidden>Paylaş</button>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
