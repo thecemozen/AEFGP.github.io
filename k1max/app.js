@@ -39,7 +39,7 @@ function toBlob(text, id) {
 }
 
 // ================================================================= durum ve profiller
-const APP_VERSION = '2.21';
+const APP_VERSION = '2.22';
 const DEVICE_KEYS = ['hostIp', 'hostPort', 'apiKey', 'startLineInfo'];
 const FAST_PRESET = 'Hızlı baskı (uyarlanabilir 0.10–0.28)';
 let state = null;
@@ -1733,6 +1733,11 @@ function buildPreview(res) {
 
 function onResult(res) {
   wake(10);
+  // düşük çözünürlüklü kavis uyarısı (bir kez)
+  if (res.stats && res.stats.facets >= 6 && !state.process.values.smoothCurves && !onResult.facetTold) {
+    onResult.facetTold = true;
+    setTimeout(() => toast('Modelin kavisleri düşük çözünürlüklü: baskıda köşeli görünebilir. Ayarlar → Kalite → "Köşeli kavisleri yumuşat"ı açabilirsiniz.'), 1200);
+  }
   result = res;
   result.name = gcodeName();
   clearPreviewObj();
