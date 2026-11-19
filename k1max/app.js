@@ -39,7 +39,7 @@ function toBlob(text, id) {
 }
 
 // ================================================================= durum ve profiller
-const APP_VERSION = '2.29';
+const APP_VERSION = '2.30';
 const DEVICE_KEYS = ['hostIp', 'hostPort', 'apiKey', 'startLineInfo'];
 const FAST_PRESET = 'Hızlı baskı (uyarlanabilir 0.10–0.28)';
 let state = null;
@@ -1670,6 +1670,8 @@ function buildJob() {
   const jobParts = parts.map(p => ({ name: p.name, slot: p.slot, flowMul: p.flowMul || 1, positions: worldGeom(p).attributes.position.array, role: p.role, paint: jobPaint(p),
     ranges: p.obj && p.obj.ranges && p.obj.ranges.length ? p.obj.ranges.map(r => ({ z0: r.z0, z1: r.z1, S: r.S })) : undefined }));
   const F = state.flush;
+  // temizleme (purge) çizgisinin bittiği nokta: ilk katman oradan başlar
+  try { const sl = startLineSegments().segs; if (sl.length) { const e = sl[sl.length - 1]; S.purgeEnd = [e[2], e[3]]; } } catch (e) { /* yok */ }
   const job = { parts: jobParts, S, fils, flush: F && F.on ? F.m.map(row => row.map(v => Math.max(0, v * F.mult))) : null };
   if (calibMode) {
     Object.assign(S, calibMode.S || {});

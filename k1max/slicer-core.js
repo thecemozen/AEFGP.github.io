@@ -887,6 +887,19 @@
     return res;
   }
 
+  // Kapalı konturu verilen noktaya en yakın kenar noktasından başlat (gerekirse oraya yeni köşe ekler)
+  function loopAt(path, q) {
+    var r = toPts(path), n = r.length, bd = Infinity, bi = 0, bp = r[0];
+    for (var i = 0; i < n; i++) {
+      var a = r[i], b = r[(i + 1) % n], dx = b[0] - a[0], dy = b[1] - a[1], L = dx * dx + dy * dy || 1e-12;
+      var t = Math.max(0, Math.min(1, ((q[0] - a[0]) * dx + (q[1] - a[1]) * dy) / L)), px = a[0] + dx * t, py = a[1] + dy * t, d = (px - q[0]) * (px - q[0]) + (py - q[1]) * (py - q[1]);
+      if (d < bd) { bd = d; bi = i; bp = [px, py]; }
+    }
+    var o = [bp].concat(r.slice(bi + 1), r.slice(0, bi + 1));
+    if (Math.hypot(o[1][0] - bp[0], o[1][1] - bp[1]) < 0.01) o.shift();
+    o.push(o[0]);
+    return o;
+  }
   function toPts(path) { return path.map(function (p) { return [p.X / SCALE, p.Y / SCALE]; }); }
 
   // Kapalı konturu dikiş noktasından başlatır
@@ -1469,7 +1482,7 @@
       }
       var topOnly = intersect(top, solid);
       var solidNoTop = difference(solid, topOnly);
-      var ang = (li % 2 === 0) ? S.solidAngle : S.solidAngle + 90;
+      var ang = ((li + (S.solidParity | 0)) % 2 === 0) ? S.solidAngle : S.solidAngle + 90;
       var ws = first ? W.first : W.solid;
       // Çıkıntılarda ek duvar (Orca: extra perimeters on overhangs): alt katmanın taşımadığı dolgu bölgesi (köprü
       // değilse) dolgu yerine çevresinden içe doğru duvar halkalarıyla basılır — sarkan kenar daha sağlam olur
@@ -1795,6 +1808,9 @@
     var bedCx = S.bedX / 2;
     var speedFactor = 1;
     var W = S.W;
+    // Başlangıç makrosunun temizleme (purge) çizgisi biliniyorsa kafa onun sonundadır; ilk katman oradan başlar
+    var posKnown = false;
+    if (Array.isArray(S.purgeEnd) && isFinite(S.purgeEnd[0]) && isFinite(S.purgeEnd[1])) { pos.x = +S.purgeEnd[0]; pos.y = +S.purgeEnd[1]; posKnown = true; }
     var lastSeam = [bedCx, S.bedY], islandSeam = null, prevSeams = [], curSeams = [], seamLi = -1;
     // Duvar halkalarını konturlarına göre grupla: her dış halka (ada konturu ya da delik) ve onun içe doğru halkaları.
     // Böylece bir deliğin bütün duvarları bitirilip sonraki deliğe geçilir; her duvar sırası için bütün delikler
@@ -1936,14 +1952,17 @@
           var lift = Math.min(pendingHop, dd * tanA), rl = Math.min(dd, ramp), rx = pos.x + (q[0] - pos.x) * rl / dd, ry = pos.y + (q[1] - pos.y) * rl / dd;
           out.push('G0 X' + f3(rx) + ' Y' + f3(ry) + ' Z' + f3(pos.z + lift) + ' F' + Math.round(spd * 60));
           stats.time += moveTime(rl, spd, Math.min(S.accelTravel, S.machineMaxAccel));
-          preview.push(pos.x, pos.y, pos.z, rx, ry, pos.z, T.TRAVEL, extruder, 0, 0, spd);
+          if (posKnown) preview.push(pos.x, pos.y, pos.z, rx, ry, pos.z, T.TRAVEL, extruder, 0, 0, spd);
           pos.x = rx; pos.y = ry; hopped = lift; pendingHop = 0;
           dd = Math.hypot(q[0] - pos.x, q[1] - pos.y);
           if (dd < 0.01) return;
         }
         out.push('G0 X' + f3(q[0]) + ' Y' + f3(q[1]) + ' F' + Math.round(spd * 60));
         stats.time += moveTime(dd, spd, Math.min(S.accelTravel, S.machineMaxAccel)); // süre, sonraki yolun türüne yazılır
-        preview.push(pos.x, pos.y, pos.z, q[0], q[1], pos.z, T.TRAVEL, extruder, 0, 0, spd); // kafa hareketi önizlemesi için hep kaydedilir
+        // kafa hareketi önizlemesi için hep kaydedilir; ilk hareket hariç (başlangıç makrosundan sonra kafanın nerede
+        // olduğu bilinmez, tablanın köşesinden çizilen yanıltıcı bir çizgi olurdu)
+        if (posKnown) preview.push(pos.x, pos.y, pos.z, q[0], q[1], pos.z, T.TRAVEL, extruder, 0, 0, spd);
+        posKnown = true;
         pos.x = q[0]; pos.y = q[1];
       });
       curF = spd;
@@ -2154,7 +2173,7 @@
     function emitLinesSeparate(lines, speed, width, height, type, accel) {
       orderLines(lines, [pos.x, pos.y]).forEach(function (s) { extrudePath(s, speed, width, height, type, accel, 1); });
     }
-    function emitLoops(paths, speed, width, height, type, accel, flow) {
+    function emitLoops(paths, speed, width, height, type, accel, flow, near) {
       var done = new Uint8Array(paths.length);
       for (var n = 0; n < paths.length; n++) {
         var b = -1, bd = Infinity;
@@ -2165,7 +2184,7 @@
           if (d < bd) { bd = d; b = k; }
         }
         done[b] = 1;
-        extrudePath(loopFrom(paths[b], 'nearest', [pos.x, pos.y], bedCx), speed, width, height, type, accel, flow);
+        extrudePath(near ? loopAt(paths[b], near) : loopFrom(paths[b], 'nearest', [pos.x, pos.y], bedCx), speed, width, height, type, accel, flow);
       }
     }
     function surfaceFill(region, pattern, width, angle, speed, height, type, accel, flow, pre, preReg) {
@@ -2406,6 +2425,9 @@
       parts.forEach(function (p) { if (p.regions[li] && p.regions[li].outline.length) (bySlot[p.slot] = bySlot[p.slot] || []).push(p); });
       var supHere = supports.sup[li].length || supports.iface[li].length;
       if (supHere) bySlot[job.supportSlot] = bySlot[job.supportSlot] || [];
+      if (first) Object.keys(bySlot).forEach(function (k) {   // ilk katmanda temizleme çizgisine yakın parçadan başla
+        bySlot[k].sort(function (A, B) { var da = Math.hypot((A.bbox.minX + A.bbox.maxX) / 2 - pos.x, (A.bbox.minY + A.bbox.maxY) / 2 - pos.y), db = Math.hypot((B.bbox.minX + B.bbox.maxX) / 2 - pos.x, (B.bbox.minY + B.bbox.maxY) / 2 - pos.y); return da - db; });
+      });
       var slots = Object.keys(bySlot).map(Number);
       slots.sort(function (a, b) { return (a === extruder ? -1 : 0) - (b === extruder ? -1 : 0) || a - b; });
 
@@ -2438,7 +2460,19 @@
         var sk = job.skirt;
         if (sk && li < sk.layers && (sk.rings.length || (first && sk.brim.length))) {
           var wsk = first ? W.first : W.outer;
-          if (sk.rings.length) { out.push(';TYPE:Skirt'); emitLoops(sk.rings, first ? S.firstLayerSpeed : S.outerWallSpeed, wsk, h, T.SKIRT, first ? S.accelFirst : S.accelOuterWall, 1); }
+          // Etek, modelin dikişinin bekleneceği yere en yakın noktadan başlar (ve orada biter): etekten sonra
+          // kafa tablanın öbür ucundaki dikişe boşuna gitmez
+          var skNear = null;
+          if (!first && S.seam !== 'nearest' && S.seam !== 'random' && slots.length && bySlot[slots[0]].length) {
+            // ilk basılacak parçanın ilk adasının dış duvar dikişi
+            var fp = bySlot[slots[0]][0], fpl = planOf(fp), ws0 = fpl && fpl[0] && fpl[0].wallSets && fpl[0].wallSets[0];
+            if (ws0 && ws0.length) {
+              var big0 = ws0[0], ba0 = 0; ws0.forEach(function (q) { var a3 = Math.abs(CL.Clipper.Area(q)); if (a3 > ba0) { ba0 = a3; big0 = q; } });
+              var nr1 = lastSeam; if (prevSeams.length) nr1 = prevSeams[0];
+              skNear = loopFrom(big0, S.seam === 'aligned' ? 'nearest' : S.seam, nr1, bedCx)[0];
+            }
+          }
+          if (sk.rings.length) { out.push(';TYPE:Skirt'); emitLoops(sk.rings, first ? S.firstLayerSpeed : S.outerWallSpeed, wsk, h, T.SKIRT, first ? S.accelFirst : S.accelOuterWall, 1, skNear); }
           if (first && sk.brim.length) { out.push(';TYPE:Brim'); emitLoops(sk.brim, S.firstLayerSpeed, wsk, h, T.SKIRT, S.accelFirst, 1); }
         }
         slots.forEach(function (slot) {
@@ -2468,7 +2502,10 @@
           var groupSeam = function (o) {
             if (seamLi !== li) { prevSeams = curSeams; curSeams = []; seamLi = li; }
             var sm0 = S.seam === 'aligned' ? 'nearest' : S.seam, nr0 = [pos.x, pos.y];
-            if (S.seam === 'aligned' || S.seam === 'corner') {
+            // ilk katman: temizleme çizgisinin bittiği yere (kafanın o anki yerine) en yakın noktadan başla; sonraki
+            // katmanların hizalı dikişi de buna göre oluşur
+            if (first) sm0 = 'nearest';
+            else if (S.seam === 'aligned' || S.seam === 'corner') {
               // önceki katmanda bu konturun dikişine en yakın nokta (yoksa genel son dikiş)
               nr0 = lastSeam; var bd0 = Infinity, c0 = o[0];
               prevSeams.forEach(function (q) { var d = Math.hypot(q[0] - c0.X / SCALE, q[1] - c0.Y / SCALE); if (d < bd0) { bd0 = d; nr0 = q; } });
@@ -2756,7 +2793,7 @@
     // Başlık bloğu: Moonraker/Fluidd dilimleyiciyi "; generated by AD SÜRÜM on TARİH at SAAT" satırından tanır
     var now = new Date(), p2 = function (n) { return (n < 10 ? '0' : '') + n; };
     header.push('; HEADER_BLOCK_START');
-    header.push('; generated by K1MaxDilimleyici 2.29 on ' + now.getFullYear() + '-' + p2(now.getMonth() + 1) + '-' + p2(now.getDate()) +
+    header.push('; generated by K1MaxDilimleyici 2.30 on ' + now.getFullYear() + '-' + p2(now.getMonth() + 1) + '-' + p2(now.getDate()) +
       ' at ' + p2(now.getHours()) + ':' + p2(now.getMinutes()) + ':' + p2(now.getSeconds()));
     header.push('; total layer number: ' + nL);
     header.push('; HEADER_BLOCK_END', '');
@@ -2928,6 +2965,19 @@
       var all = [];
       parts.forEach(function (p) { all = all.concat(p.outline[li]); });
       U.push(union(all));
+    }
+    // İlk katmanın katı dolgu açısı: taramanın bir ucu temizleme çizgisinin bittiği yere yakın olsun (dolgu oradan
+    // başlar, ilk katmanda tablanın öbür ucuna boşuna gidilmez). Katmanlar yine sırayla 90° dönerek değişir.
+    S.solidParity = 0;
+    if (U[0] && U[0].length) {
+      var pq = Array.isArray(S.purgeEnd) ? S.purgeEnd : [0, 0], bestPar = 0, bestD = Infinity;
+      [0, 1].forEach(function (par) {
+        var a = (S.solidAngle + (par ? 90 : 0)) * Math.PI / 180, nx = -Math.sin(a), ny = Math.cos(a), lo = Infinity, hi = -Infinity, plo = null, phi = null;
+        U[0].forEach(function (pth) { pth.forEach(function (v) { var x = v.X / SCALE, y = v.Y / SCALE, d = x * nx + y * ny; if (d < lo) { lo = d; plo = [x, y]; } if (d > hi) { hi = d; phi = [x, y]; } }); });
+        var dd = Math.min(Math.hypot(plo[0] - pq[0], plo[1] - pq[1]), Math.hypot(phi[0] - pq[0], phi[1] - pq[1]));
+        if (dd < bestD - 1) { bestD = dd; bestPar = par; }
+      });
+      S.solidParity = bestPar;
     }
     // bölgeler: eşzamanlı sürüm burada hesaplar, paralel sürüm (sliceParallel) yardımcı iş parçacıklarına dağıtır
     yield { kind: 'regions', parts: parts, layers: layers, S: S, U: U };
