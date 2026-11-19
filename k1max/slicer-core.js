@@ -803,7 +803,32 @@
   }
 
   // ---------------------------------------------------------------- yol sıralama
-  function orderLines(lines, start) {
+  // Tarama çizgilerinde (lineFill: L[4] = satır konumu) başlangıç, satırların iki ucundan kafaya yakın olanıdır.
+  // Ortadaki bir çizgiden başlanırsa dolgu iki yarıya bölünür ve yarıların arasında uzun bir boş gidiş olur.
+  function edgeStart(lines, start) {
+    if (lines.length < 3 || lines[0].length < 5) return start;
+    var i;
+    var lo = Infinity, hi = -Infinity;
+    for (i = 0; i < lines.length; i++) { if (lines[i][4] < lo) lo = lines[i][4]; if (lines[i][4] > hi) hi = lines[i][4]; }
+    var eps = 1, best = null, bd = Infinity;   // tam en uçtaki satır (köşedeki kısa çizgiler sona kalmasın)
+    for (i = 0; i < lines.length; i++) {
+      var l = lines[i]; if (l[4] - lo > eps && hi - l[4] > eps) continue;
+      for (var k = 0; k < 4; k += 2) { var d = (l[k] - start[0]) * (l[k] - start[0]) + (l[k + 1] - start[1]) * (l[k + 1] - start[1]); if (d < bd) { bd = d; best = [l[k], l[k + 1]]; } }
+    }
+    return best || start;
+  }
+  // İki başlangıcı da dene (en yakın çizgi / taramanın kenarı), toplam boş gidişi az olanı kullan
+  // Katı yüzeylerde (alt/üst/iç katı) her zaman kenardan: ortadan başlayıp iki yana yayılan dolguda iki yarının
+  // birleştiği çizgi soğumuş komşuya yanaşır ve iz bırakabilir.
+  function orderLines(lines, start, edge) {
+    var es = edgeStart(lines, start);
+    if (es === start || (es[0] === start[0] && es[1] === start[1])) return orderLinesFrom(lines, start);
+    if (edge) return orderLinesFrom(lines, es);
+    var a = orderLinesFrom(lines, start), b = orderLinesFrom(lines, es);
+    var cost = function (o) { var c = 0, px = start[0], py = start[1]; for (var i = 0; i < o.length; i++) { c += Math.hypot(o[i][0][0] - px, o[i][0][1] - py); px = o[i][1][0]; py = o[i][1][1]; } return c; };
+    return cost(b) < cost(a) ? b : a;
+  }
+  function orderLinesFrom(lines, start) {
     var res = [];
     var used = new Uint8Array(lines.length);
     var px = start[0], py = start[1];
@@ -827,8 +852,16 @@
   }
 
   // Monoton sıralama: çizgiler tarama yönünde sırayla, hepsi aynı yönde basılır (üst yüzeyde düzgün görünüm)
-  function orderMonotonic(lines) {
-    return lines.slice().sort(function (a, b) { return a[4] - b[4] || a[5] - b[5]; })
+  function orderMonotonic(lines, start) {
+    var asc = true;
+    if (start && lines.length > 1) {   // kafaya yakın uçtan başla (yön tüm çizgilerde aynı kalır)
+      var lo = lines[0], hi = lines[0];
+      lines.forEach(function (l) { if (l[4] < lo[4]) lo = l; if (l[4] > hi[4]) hi = l; });
+      var dl = Math.min(Math.hypot(lo[0] - start[0], lo[1] - start[1]), Math.hypot(lo[2] - start[0], lo[3] - start[1]));
+      var dh = Math.min(Math.hypot(hi[0] - start[0], hi[1] - start[1]), Math.hypot(hi[2] - start[0], hi[3] - start[1]));
+      asc = dl <= dh;
+    }
+    return lines.slice().sort(function (a, b) { return asc ? (a[4] - b[4] || a[5] - b[5]) : (b[4] - a[4] || a[5] - b[5]); })
       .map(function (L) { return [[L[0], L[1]], [L[2], L[3]]]; });
   }
 
@@ -1762,7 +1795,22 @@
     var bedCx = S.bedX / 2;
     var speedFactor = 1;
     var W = S.W;
-    var lastSeam = [bedCx, S.bedY];
+    var lastSeam = [bedCx, S.bedY], islandSeam = null, prevSeams = [], curSeams = [], seamLi = -1;
+    // Duvar halkalarını konturlarına göre grupla: her dış halka (ada konturu ya da delik) ve onun içe doğru halkaları.
+    // Böylece bir deliğin bütün duvarları bitirilip sonraki deliğe geçilir; her duvar sırası için bütün delikler
+    // tek tek dolaşılmaz.
+    function wallGroups(wallSets) {
+      var outers = wallSets[0] || [], groups = outers.map(function (o) { return { outer: o, levels: wallSets.map(function () { return []; }) }; });
+      outers.forEach(function (o, i) { groups[i].levels[0].push(o); });
+      if (!groups.length) { groups.push({ outer: null, levels: wallSets.map(function (ws) { return ws.slice(); }) }); groups[0].levels[0] = []; return groups; }
+      var samp = outers.map(function (o) { var st = Math.max(1, Math.floor(o.length / 64)), r = []; for (var k = 0; k < o.length; k += st) r.push(o[k]); return r; });
+      for (var L = 1; L < wallSets.length; L++) wallSets[L].forEach(function (pth) {
+        var q = pth[0], bg = 0, bd = Infinity;
+        for (var g = 0; g < samp.length; g++) for (var k = 0; k < samp[g].length; k++) { var dx = samp[g][k].X - q.X, dy = samp[g][k].Y - q.Y, d = dx * dx + dy * dy; if (d < bd) { bd = d; bg = g; } }
+        groups[bg].levels[L].push(pth);
+      });
+      return groups;
+    }
 
     function f3(n) { return (Math.round(n * 1000) / 1000).toString(); }
     function f5(n) { return (Math.round(n * 100000) / 100000).toString(); }
@@ -2063,10 +2111,10 @@
     function emitLinesJoined(lines, speed, width, height, type, accel, flow, monotonic) {
       if (!lines.length) return;
       if (monotonic) {
-        orderMonotonic(lines).forEach(function (s) { extrudePath(s, speed, width, height, type, accel, flow); });
+        orderMonotonic(lines, [pos.x, pos.y]).forEach(function (s) { extrudePath(s, speed, width, height, type, accel, flow); });
         return;
       }
-      var ordered = orderLines(lines, [pos.x, pos.y]);
+      var ordered = orderLines(lines, [pos.x, pos.y], type === T.SOLID || type === T.TOP || type === T.BRIDGE);
       var poly = null, polys = [];
       for (var i = 0; i < ordered.length; i++) {
         var s = ordered[i];
@@ -2415,9 +2463,37 @@
           // "bir ters bir düz": tek katmanlarda duvar yönü ters; 'order' modunda ayrıca önce dolgu, sonra duvarlar ters sırada
           var odd = !first && li % 2 === 1, altMode = S.alternateLayers || 'none';
           wallRev = odd && altMode !== 'none';
+          // Adanın dikiş noktası önce dış duvar için seçilir; iç duvarlar da oradan başlar. Yoksa iç duvar kendi
+          // "köşesini" seçip dış duvar başka yerden başlayınca her katmanda tablanın bir ucundan öbürüne boş gidilir.
+          var groupSeam = function (o) {
+            if (seamLi !== li) { prevSeams = curSeams; curSeams = []; seamLi = li; }
+            var sm0 = S.seam === 'aligned' ? 'nearest' : S.seam, nr0 = [pos.x, pos.y];
+            if (S.seam === 'aligned' || S.seam === 'corner') {
+              // önceki katmanda bu konturun dikişine en yakın nokta (yoksa genel son dikiş)
+              nr0 = lastSeam; var bd0 = Infinity, c0 = o[0];
+              prevSeams.forEach(function (q) { var d = Math.hypot(q[0] - c0.X / SCALE, q[1] - c0.Y / SCALE); if (d < bd0) { bd0 = d; nr0 = q; } });
+              if (prevSeams.length) { bd0 = Infinity; for (var k = 0; k < o.length; k += Math.max(1, Math.floor(o.length / 64))) prevSeams.forEach(function (q) { var d = Math.hypot(q[0] - o[k].X / SCALE, q[1] - o[k].Y / SCALE); if (d < bd0) { bd0 = d; nr0 = q; } }); }
+            }
+            var sp0 = loopFrom(o, sm0, nr0, bedCx);
+            if (job.seamE) sp0 = seamPaint(sp0, job.seamE[li], job.seamB[li]);
+            return sp0[0];
+          };
           var emitWalls = function (revOrder) {
-            if ((S.wallOrder === 'outer-inner') !== revOrder) { for (var a = 0; a < wallSets.length; a++) emitWall(wallSets[a], a === 0, wo, wi); }
-            else { for (var b = wallSets.length - 1; b >= 0; b--) emitWall(wallSets[b], b === 0, wo, wi); }
+            var outerFirst = (S.wallOrder === 'outer-inner') !== revOrder;
+            var groups = wallGroups(wallSets);
+            groups.forEach(function (g) { g.seam = g.outer ? groupSeam(g.outer) : null; });
+            var left = groups.slice();
+            while (left.length) {
+              var bi = 0, bd1 = Infinity;
+              left.forEach(function (g, i) { var q = g.seam || (g.levels.find(function (l) { return l.length; }) || [[{ X: 0, Y: 0 }]])[0][0]; var qx = q.X !== undefined ? q.X / SCALE : q[0], qy = q.Y !== undefined ? q.Y / SCALE : q[1];
+                var d = Math.hypot(qx - pos.x, qy - pos.y); if (d < bd1) { bd1 = d; bi = i; } });
+              var g = left.splice(bi, 1)[0];
+              islandSeam = g.seam;
+              if (g.seam) curSeams.push(g.seam);
+              var n0 = g.levels.length;
+              for (var a = 0; a < n0; a++) { var lv = outerFirst ? a : n0 - 1 - a; if (g.levels[lv].length) emitWall(g.levels[lv], lv === 0, wo, wi); }
+            }
+            islandSeam = null;
           };
           var altOrder = odd && altMode === 'order';
           var fillFirst = altOrder || flushFirstSlot === p.slot; // renk değişiminden sonra yıkama dolguya
@@ -2539,6 +2615,8 @@
           done[b] = 1;
           var seam = S.seam === 'aligned' ? 'nearest' : S.seam;
           var near = (S.seam === 'aligned' || S.seam === 'corner') ? lastSeam : [pos.x, pos.y];
+          if (islandSeam) { seam = 'nearest'; near = islandSeam; }
+          else if (!isOuter) { seam = 'nearest'; near = [pos.x, pos.y]; }
           // küçük çevreler (delik, ince kıvrım): yavaş bas, köşeler ve daireler düzgün çıksın (Orca: small perimeters)
           baseSp = wallSp;
           if (smallLen > 0 && !first) {
@@ -2678,7 +2756,7 @@
     // Başlık bloğu: Moonraker/Fluidd dilimleyiciyi "; generated by AD SÜRÜM on TARİH at SAAT" satırından tanır
     var now = new Date(), p2 = function (n) { return (n < 10 ? '0' : '') + n; };
     header.push('; HEADER_BLOCK_START');
-    header.push('; generated by K1MaxDilimleyici 2.28 on ' + now.getFullYear() + '-' + p2(now.getMonth() + 1) + '-' + p2(now.getDate()) +
+    header.push('; generated by K1MaxDilimleyici 2.29 on ' + now.getFullYear() + '-' + p2(now.getMonth() + 1) + '-' + p2(now.getDate()) +
       ' at ' + p2(now.getHours()) + ':' + p2(now.getMinutes()) + ':' + p2(now.getSeconds()));
     header.push('; total layer number: ' + nL);
     header.push('; HEADER_BLOCK_END', '');
