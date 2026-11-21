@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Model Stüdyo</title>
+<meta name="theme-color" content="#14161c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<header id="topbar">
+  <div class="brand">◆ Model Stüdyo</div>
+  <nav class="tabs">
+    <button class="tab active" data-tab="model">Modelle</button>
+    <button class="tab" data-tab="ai">AI ile Üret</button>
+    <button class="tab" data-tab="scene">Dosya</button>
+  </nav>
+</header>
+
+<main id="stage">
+  <canvas id="view"></canvas>
+
+  <div id="toolbar">
+    <button class="tool active" data-mode="translate" title="Taşı (W)">✥<span>Taşı</span></button>
+    <button class="tool" data-mode="rotate" title="Döndür (E)">⟳<span>Döndür</span></button>
+    <button class="tool" data-mode="scale" title="Ölçekle (R)">⤢<span>Ölçek</span></button>
+    <button class="tool" id="btnFocus" title="Odakla (F)">◎<span>Odak</span></button>
+    <button class="tool" id="btnUndo" title="Geri al (Ctrl+Z)">↶<span>Geri</span></button>
+  </div>
+
+  <div id="toast"></div>
+  <div id="busy" hidden><div class="spinner"></div><div id="busyText">Yükleniyor…</div></div>
+</main>
+
+<aside id="panel">
+  <button id="panelHandle" aria-label="Paneli aç/kapat"><span></span><em>Araçlar ▲</em></button>
+
+  <!-- ===== MODELLE ===== -->
+  <section class="pane active" data-pane="model">
+    <h3>Şekil ekle</h3>
+    <div class="grid prims">
+      <button data-prim="box">▢<span>Küp</span></button>
+      <button data-prim="sphere">●<span>Küre</span></button>
+      <button data-prim="cylinder">▮<span>Silindir</span></button>
+      <button data-prim="cone">▲<span>Koni</span></button>
+      <button data-prim="torus">◯<span>Simit</span></button>
+      <button data-prim="capsule">⬭<span>Kapsül</span></button>
+      <button data-prim="plane">▱<span>Düzlem</span></button>
+      <button data-prim="knot">∞<span>Düğüm</span></button>
+      <button data-prim="ico">⬡<span>İkosa</span></button>
+      <button data-prim="ring">◎<span>Halka</span></button>
+      <button data-prim="tube">〰<span>Boru</span></button>
+      <button data-prim="text3d">T<span>Yazı</span></button>
+    </div>
+
+    <h3>Seçili nesne</h3>
+    <div id="noSel" class="muted">Bir nesneye dokunarak seçin.</div>
+    <div id="selProps" hidden>
+      <label class="row">Ad <input id="pName" type="text"></label>
+      <label class="row">Renk <input id="pColor" type="color" value="#8ab4ff"></label>
+      <label class="row">Metalik <input id="pMetal" type="range" min="0" max="1" step="0.01"></label>
+      <label class="row">Pürüzlülük <input id="pRough" type="range" min="0" max="1" step="0.01"></label>
+      <label class="row">Opaklık <input id="pOpacity" type="range" min="0.05" max="1" step="0.01"></label>
+      <label class="row check"><input id="pWire" type="checkbox"> Tel kafes</label>
+      <label class="row check"><input id="pFlat" type="checkbox"> Düz gölgeleme</label>
+      <div class="xyz">
+        <span>Konum</span><input data-t="position" data-a="x" type="number" step="0.1"><input data-t="position" data-a="y" type="number" step="0.1"><input data-t="position" data-a="z" type="number" step="0.1">
+        <span>Dönüş°</span><input data-t="rotation" data-a="x" type="number" step="5"><input data-t="rotation" data-a="y" type="number" step="5"><input data-t="rotation" data-a="z" type="number" step="5">
+        <span>Ölçek</span><input data-t="scale" data-a="x" type="number" step="0.1"><input data-t="scale" data-a="y" type="number" step="0.1"><input data-t="scale" data-a="z" type="number" step="0.1">
+      </div>
+      <div class="btns">
+        <button id="btnDup">Kopyala</button>
+        <button id="btnMirror">Aynala X</button>
+        <button id="btnGround">Yere oturt</button>
+        <button id="btnDel" class="danger">Sil</button>
+      </div>
+    </div>
+
+    <h3>Sahne nesneleri</h3>
+    <ul id="outliner"></ul>
+  </section>
+
+  <!-- ===== AI ===== -->
+  <section class="pane" data-pane="ai">
+    <p class="muted small">Metinden veya fotoğraftan 3D model üretir. <a href="https://www.meshy.ai/api" target="_blank" rel="noopener">Meshy API</a> anahtarınızı kullanır — anahtar sadece bu cihazda saklanır.</p>
+    <label class="row col">API anahtarı
+      <input id="aiKey" type="password" placeholder="msy_..." autocomplete="off">
+    </label>
+    <div class="btns">
+      <button id="btnTestKey" class="ghost">Test anahtarı kullan</button>
+      <button id="btnSaveKey">Kaydet</button>
+    </div>
+    <details>
+      <summary>Gelişmiş: proxy (CORS hatası alırsanız)</summary>
+      <label class="row col">Proxy adresi
+        <input id="aiProxy" type="url" placeholder="https://benim-proxy.workers.dev">
+      </label>
+      <p class="muted small">Tarayıcı doğrudan bağlanamazsa klasördeki <code>proxy-worker.js</code> dosyasını Cloudflare Workers'a yükleyip adresini buraya yazın.</p>
+    </details>
+
+    <div class="seg" id="aiModeSeg">
+      <button class="active" data-ai="text">Metinden</button>
+      <button data-ai="image">Görselden</button>
+    </div>
+
+    <div id="aiText">
+      <label class="row col">Ne üretelim?
+        <textarea id="aiPrompt" rows="3" placeholder="ör. ahşap bir hazine sandığı, altın süslemeli"></textarea>
+      </label>
+      <label class="row col">İstemeden (negatif)
+        <input id="aiNeg" type="text" placeholder="ör. bulanık, düşük kalite">
+      </label>
+      <label class="row">Stil
+        <select id="aiStyle">
+          <option value="realistic">Gerçekçi</option>
+          <option value="sculpture">Heykel</option>
+        </select>
+      </label>
+    </div>
+
+    <div id="aiImage" hidden>
+      <label class="drop" id="imgDrop">
+        <input id="aiImgFile" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+        <img id="aiImgPrev" alt="" hidden>
+        <span id="aiImgHint">Fotoğraf seç / sürükle</span>
+      </label>
+    </div>
+
+    <label class="row">Poligon hedefi
+      <select id="aiPoly">
+        <option value="10000">10k (hafif)</option>
+        <option value="30000" selected>30k</option>
+        <option value="100000">100k (detaylı)</option>
+      </select>
+    </label>
+    <label class="row check"><input id="aiPbr" type="checkbox" checked> PBR doku</label>
+
+    <button id="btnGenerate" class="primary wide">✨ Üret</button>
+    <div id="aiProgress" hidden>
+      <div class="bar"><div id="aiBar"></div></div>
+      <div id="aiStatus" class="small muted"></div>
+    </div>
+
+    <h3>Geçmiş</h3>
+    <ul id="aiHistory"></ul>
+  </section>
+
+  <!-- ===== DOSYA ===== -->
+  <section class="pane" data-pane="scene">
+    <h3>İçe aktar</h3>
+    <label class="filebtn">GLB / GLTF / OBJ / STL aç
+      <input id="importFile" type="file" accept=".glb,.gltf,.obj,.stl" hidden multiple>
+    </label>
+
+    <h3>Dışa aktar</h3>
+    <label class="row check"><input id="expSel" type="checkbox"> Sadece seçili nesne</label>
+    <div class="btns">
+      <button data-export="glb">GLB</button>
+      <button data-export="gltf">GLTF</button>
+      <button data-export="obj">OBJ</button>
+      <button data-export="stl">STL (3D baskı)</button>
+      <button data-export="png">Ekran görüntüsü</button>
+    </div>
+
+    <h3>Sahne</h3>
+    <label class="row check"><input id="optGrid" type="checkbox" checked> Izgara</label>
+    <label class="row check"><input id="optSnap" type="checkbox"> Izgaraya yapış</label>
+    <label class="row">Arka plan <input id="optBg" type="color" value="#1b1e26"></label>
+    <div class="btns">
+      <button id="btnSaveLocal">Cihaza kaydet</button>
+      <button id="btnLoadLocal">Kayıttan yükle</button>
+      <button id="btnClear" class="danger">Sahneyi temizle</button>
+    </div>
+    <p class="muted small">Ana ekrana ekleyerek uygulama gibi kullanabilirsiniz (Paylaş → Ana Ekrana Ekle).</p>
+  </section>
+</aside>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

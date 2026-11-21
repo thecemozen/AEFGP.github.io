@@ -1,0 +1,14 @@
+{
+  "name": "Model Stüdyo",
+  "short_name": "Model Stüdyo",
+  "description": "Tarayıcıda 3D modelleme ve AI ile metinden/görselden 3D model üretimi",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#14161c",
+  "theme_color": "#14161c",
+  "orientation": "any",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
