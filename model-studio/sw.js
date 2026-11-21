@@ -1,6 +1,6 @@
 // Offline cache: app shell + three.js modules from the CDN
-const CACHE = 'model-studio-v1';
-const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest', 'icon.svg'];
+const CACHE = 'model-studio-v2';
+const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest', 'icon.svg', 'hull-worker.js', 'mc-tables.js'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -12,8 +12,6 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET') return;
-  // never cache AI API traffic
-  if (url.hostname.includes('meshy.ai') || url.pathname.includes('/openapi/') || url.pathname.startsWith('/fetch')) return;
   if (url.hostname === 'cdn.jsdelivr.net') {
     // CDN files are versioned → cache first
     e.respondWith(caches.match(e.request).then(hit => hit || fetch(e.request).then(res => {

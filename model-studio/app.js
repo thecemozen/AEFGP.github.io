@@ -42,6 +42,8 @@ const sun = new THREE.DirectionalLight(0xffffff, 1.6);
 sun.position.set(5, 10, 6);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.bias = -0.0004;
+sun.shadow.normalBias = 0.03;
 Object.assign(sun.shadow.camera, { left: -10, right: 10, top: 10, bottom: -10, near: 0.5, far: 40 });
 scene.add(sun);
 
@@ -381,7 +383,7 @@ function duplicate(mirror) {
 function refreshOutliner() {
   const ul = $('#outliner');
   ul.innerHTML = '';
-  if (!world.children.length) { ul.innerHTML = '<li class="muted">Sahne boş — yukarıdan şekil ekleyin veya AI ile üretin.</li>'; return; }
+  if (!world.children.length) { ul.innerHTML = '<li class="muted">Sahne boş — şekil ekleyin veya fotoğraftan model oluşturun.</li>'; return; }
   world.children.forEach(o => {
     const li = document.createElement('li');
     if (o === selected) li.classList.add('sel');
@@ -418,7 +420,10 @@ function focusSelection() {
   const r = box.getSize(new THREE.Vector3()).length() / 2 || 1;
   const dir = camera.position.clone().sub(orbit.target).normalize();
   orbit.target.copy(c);
-  camera.position.copy(c).addScaledVector(dir, r / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2)) * 1.1);
+  // fit using the narrower of the vertical/horizontal field of view (portrait phones)
+  const vf = THREE.MathUtils.degToRad(camera.fov / 2);
+  const hf = Math.atan(Math.tan(vf) * camera.aspect);
+  camera.position.copy(c).addScaledVector(dir, r / Math.sin(Math.min(vf, hf)) * 1.15);
 }
 
 addEventListener('keydown', e => {
@@ -582,238 +587,306 @@ $('#btnLoadLocal').onclick = async () => {
 };
 
 /* =========================================================
-   AI generation (Meshy API)
+   Photo → 3D (multi-view)
    ========================================================= */
-const TEST_KEY = 'msy_dummy_api_key_for_test_mode_12345678';
-const LS = {
-  get key() { return localStorage.getItem('ms_key') || ''; },
-  set key(v) { localStorage.setItem('ms_key', v); },
-  get proxy() { return localStorage.getItem('ms_proxy') || ''; },
-  set proxy(v) { localStorage.setItem('ms_proxy', v); },
-  get history() { try { return JSON.parse(localStorage.getItem('ms_history') || '[]'); } catch { return []; } },
-  set history(v) { localStorage.setItem('ms_history', JSON.stringify(v.slice(0, 40))); },
-};
-$('#aiKey').value = LS.key;
-$('#aiProxy').value = LS.proxy;
-$('#btnSaveKey').onclick = () => { LS.key = $('#aiKey').value.trim(); LS.proxy = $('#aiProxy').value.trim(); toast('Kaydedildi'); };
-$('#btnTestKey').onclick = () => { $('#aiKey').value = TEST_KEY; LS.key = TEST_KEY; toast('Test anahtarı: örnek modeller döner, kredi harcamaz'); };
-$('#aiProxy').onchange = () => { LS.proxy = $('#aiProxy').value.trim(); };
+const VIEW_NAMES = { front: 'Ön', back: 'Arka', left: 'Sol', right: 'Sağ', top: 'Üst' };
+const views = {};          // name -> { file, img (canvas), mirror, mask }
+let engine = 'local';
+let resultObj = null;      // mesh in scene
+let resultStl = null;      // ArrayBuffer (binary STL, mm, Z-up)
+let resultGeo = null;      // BufferGeometry in mm, Y-up
 
-const apiBase = () => (LS.proxy ? LS.proxy.replace(/\/+$/, '') : 'https://api.meshy.ai');
-const ENDPOINT = { text: '/openapi/v2/text-to-3d', refine: '/openapi/v2/text-to-3d', image: '/openapi/v1/image-to-3d' };
+$$('#engineSeg button').forEach(b => b.onclick = () => {
+  engine = b.dataset.engine;
+  $$('#engineSeg button').forEach(x => x.classList.toggle('active', x === b));
+  $$('.local-only').forEach(el => el.hidden = engine !== 'local');
+  $$('.server-only').forEach(el => el.hidden = engine !== 'server');
+  $$('.slot').forEach(s => drawSlot(s.dataset.view));
+});
+$('#srvUrl').value = localStorage.getItem('ms_server') || '';
+$('#srvUrl').onchange = e => localStorage.setItem('ms_server', e.target.value.trim());
 
-async function api(path, body) {
-  const key = ($('#aiKey').value || LS.key).trim();
-  if (!key) throw new Error('Önce API anahtarı girin');
-  let res;
-  try {
-    res = await fetch(apiBase() + path, {
-      method: body ? 'POST' : 'GET',
-      headers: { Authorization: 'Bearer ' + key, ...(body ? { 'Content-Type': 'application/json' } : {}) },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-  } catch (e) {
-    throw new Error('Bağlantı kurulamadı (CORS/ağ). Gelişmiş bölümünden proxy tanımlayın.');
-  }
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.message || `API hatası (${res.status})`);
-  return data;
+async function loadImageCanvas(file, max) {
+  const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }).catch(() => createImageBitmap(file));
+  const k = Math.min(1, max / Math.max(bmp.width, bmp.height));
+  const c = document.createElement('canvas');
+  c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+  return c;
 }
 
-// mode switch
-let aiMode = 'text';
-$$('#aiModeSeg button').forEach(b => b.onclick = () => {
-  aiMode = b.dataset.ai;
-  $$('#aiModeSeg button').forEach(x => x.classList.toggle('active', x === b));
-  $('#aiText').hidden = aiMode !== 'text';
-  $('#aiImage').hidden = aiMode !== 'image';
+// Background removal: flood-fill from the image border over pixels close to the background colour,
+// keep the largest remaining blob, crop to its bounding box (+padding).
+function computeMask(img, thr, holes) {
+  const w = img.width, h = img.height, N = w * h;
+  const d = img.getContext('2d').getImageData(0, 0, w, h).data;
+  const bg = new Uint8Array(N);
+  let transparent = 0;
+  for (let i = 0; i < N; i++) if (d[i * 4 + 3] < 128) transparent++;
+  if (transparent > N * 0.01) {
+    for (let i = 0; i < N; i++) bg[i] = d[i * 4 + 3] < 128 ? 1 : 0;
+  } else {
+    // background colour = median of the border pixels
+    const rs = [], gs = [], bs = [];
+    const take = i => { rs.push(d[i * 4]); gs.push(d[i * 4 + 1]); bs.push(d[i * 4 + 2]); };
+    for (let x = 0; x < w; x++) { take(x); take((h - 1) * w + x); }
+    for (let y = 0; y < h; y++) { take(y * w); take(y * w + w - 1); }
+    const med = a => a.sort((p, q) => p - q)[a.length >> 1];
+    const R = med(rs), G = med(gs), B = med(bs);
+    const t2 = thr * thr;
+    const near = i => { const r = d[i * 4] - R, g = d[i * 4 + 1] - G, b = d[i * 4 + 2] - B; return 0.3 * r * r + 0.59 * g * g + 0.11 * b * b < t2; };
+    if (holes) for (let i = 0; i < N; i++) bg[i] = near(i) ? 1 : 0;
+    else {
+      const st = new Int32Array(N); let sp = 0;
+      const push = i => { if (!bg[i] && near(i)) { bg[i] = 1; st[sp++] = i; } };
+      for (let x = 0; x < w; x++) { push(x); push((h - 1) * w + x); }
+      for (let y = 0; y < h; y++) { push(y * w); push(y * w + w - 1); }
+      while (sp) {
+        const i = st[--sp], x = i % w;
+        if (x > 0) push(i - 1); if (x < w - 1) push(i + 1);
+        if (i >= w) push(i - w); if (i < N - w) push(i + w);
+      }
+    }
+  }
+  // largest connected object component
+  const lab = new Int32Array(N); let best = 0, bestSize = 0, cur = 0;
+  const st = new Int32Array(N);
+  for (let s = 0; s < N; s++) {
+    if (bg[s] || lab[s]) continue;
+    cur++; let sp = 0, size = 0; st[sp++] = s; lab[s] = cur;
+    while (sp) {
+      const i = st[--sp], x = i % w; size++;
+      const nb = [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, i >= w ? i - w : -1, i < N - w ? i + w : -1];
+      for (const j of nb) if (j >= 0 && !bg[j] && !lab[j]) { lab[j] = cur; st[sp++] = j; }
+    }
+    if (size > bestSize) { bestSize = size; best = cur; }
+  }
+  if (!best || bestSize < N * 0.002) return null;
+  let x0 = w, y0 = h, x1 = 0, y1 = 0;
+  for (let i = 0; i < N; i++) if (lab[i] === best) {
+    const x = i % w, y = (i / w) | 0;
+    if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+  }
+  const pad = 6, cw = x1 - x0 + 1, ch = y1 - y0 + 1, W = cw + 2 * pad, H = ch + 2 * pad;
+  const mask = new Uint8Array(W * H);
+  for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) mask[(y + pad) * W + x + pad] = lab[(y + y0) * w + x + x0] === best ? 1 : 0;
+  majority(mask, W, H); majority(mask, W, H);
+  return { mask, w: W, h: H, pad, bbox: [x0, y0, x1, y1], full: lab, best, fullCovered: bestSize / N };
+}
+
+// 3x3 majority filter: removes single-pixel spurs and notches along the outline
+function majority(m, w, h) {
+  const src = m.slice();
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+    let c = 0;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) c += src[(y + dy) * w + x + dx];
+    m[y * w + x] = c >= 5 ? 1 : 0;
+  }
+}
+
+function drawSlot(name) {
+  const slot = $(`.slot[data-view="${name}"]`);
+  const cv = slot.querySelector('canvas'), ph = slot.querySelector('.ph');
+  const v = views[name];
+  slot.classList.toggle('filled', !!v);
+  slot.classList.toggle('bad', !!v && engine === 'local' && !v.mask);
+  cv.style.transform = v?.mirror ? 'scaleX(-1)' : '';
+  if (!v) { cv.width = cv.height = 0; ph.hidden = false; return; }
+  ph.hidden = true;
+  const img = v.img;
+  const k = 220 / Math.max(img.width, img.height);
+  cv.width = Math.round(img.width * k); cv.height = Math.round(img.height * k);
+  const g = cv.getContext('2d');
+  g.drawImage(img, 0, 0, cv.width, cv.height);
+  if (engine !== 'local' || !v.mask) return;
+  // darken background, outline bbox
+  const sm = document.createElement('canvas'); sm.width = img.width; sm.height = img.height;
+  const sg = sm.getContext('2d'), id = sg.createImageData(img.width, img.height);
+  const lab = v.mask.full, best = v.mask.best;
+  for (let i = 0; i < lab.length; i++) { if (lab[i] !== best) { id.data[i * 4 + 3] = 170; } }
+  sg.putImageData(id, 0, 0);
+  g.drawImage(sm, 0, 0, cv.width, cv.height);
+  const [x0, y0, x1, y1] = v.mask.bbox;
+  g.strokeStyle = '#7c9cff'; g.lineWidth = 2;
+  g.strokeRect(x0 * k, y0 * k, (x1 - x0 + 1) * k, (y1 - y0 + 1) * k);
+}
+
+function remask(name) {
+  const v = views[name];
+  if (!v) return;
+  v.mask = computeMask(v.img, +$('#phThr').value, $('#phHoles').checked);
+  drawSlot(name);
+}
+let remaskTimer;
+const remaskAll = () => { clearTimeout(remaskTimer); remaskTimer = setTimeout(() => Object.keys(views).forEach(remask), 120); };
+$('#phThr').oninput = remaskAll;
+$('#phHoles').onchange = remaskAll;
+
+$$('.slot').forEach(slot => {
+  const name = slot.dataset.view;
+  slot.querySelector('input').onchange = async e => {
+    const file = e.target.files[0]; e.target.value = '';
+    if (!file) return;
+    busy(true, VIEW_NAMES[name] + ' görseli işleniyor…');
+    try {
+      views[name] = { file, img: await loadImageCanvas(file, 640), mirror: false };
+      remask(name);
+      if (!views[name].mask) toast(VIEW_NAMES[name] + ': nesne bulunamadı — hassasiyeti değiştirin', 4000);
+    } catch (err) { toast('Görsel açılamadı: ' + err.message); }
+    finally { busy(false); }
+  };
+  slot.querySelector('[data-act="mirror"]').onclick = () => { if (views[name]) { views[name].mirror = !views[name].mirror; drawSlot(name); } };
+  slot.querySelector('[data-act="clear"]').onclick = () => { delete views[name]; drawSlot(name); };
+  // drag & drop on desktop
+  slot.addEventListener('dragover', e => e.preventDefault());
+  slot.addEventListener('drop', e => {
+    e.preventDefault();
+    const f = e.dataTransfer.files[0]; if (!f) return;
+    const inp = slot.querySelector('input'); const dt = new DataTransfer(); dt.items.add(f); inp.files = dt.files; inp.onchange({ target: inp });
+  });
+  drawSlot(name);
 });
 
-// image picking (+ downscale to keep request small)
-let imageDataUrl = null;
-async function pickImage(file) {
-  if (!file) return;
-  const img = await createImageBitmap(file);
-  const s = Math.min(1, 1024 / Math.max(img.width, img.height));
-  const c = document.createElement('canvas');
-  c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
-  c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-  imageDataUrl = c.toDataURL(file.type === 'image/png' ? 'image/png' : 'image/jpeg', 0.92);
-  $('#aiImgPrev').src = imageDataUrl; $('#aiImgPrev').hidden = false; $('#aiImgHint').hidden = true;
-}
-$('#aiImgFile').onchange = e => pickImage(e.target.files[0]);
-const drop = $('#imgDrop');
-drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
-drop.addEventListener('dragleave', () => drop.classList.remove('over'));
-drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); pickImage(e.dataTransfer.files[0]); });
-
-function showProgress(on, pct = 0, text = '') {
-  $('#aiProgress').hidden = !on;
-  $('#aiBar').style.width = pct + '%';
-  $('#aiStatus').textContent = text;
+function phProgress(on, pct = 0, text = '') {
+  $('#phProgress').hidden = !on; $('#phBar').style.width = pct + '%'; $('#phStatus').textContent = text;
 }
 
-function updateHistory(id, patch) {
-  const h = LS.history;
-  const i = h.findIndex(x => x.id === id);
-  if (i >= 0) { h[i] = { ...h[i], ...patch }; LS.history = h; }
-  renderHistory();
-}
-
-$('#btnGenerate').onclick = async () => {
-  const btn = $('#btnGenerate');
-  const poly = +$('#aiPoly').value;
-  const tex = $('#aiPbr').checked;
-  try {
-    btn.disabled = true;
-    let kind, body, label;
-    if (aiMode === 'text') {
-      const p = $('#aiPrompt').value.trim();
-      if (!p) throw new Error('Bir açıklama yazın');
-      kind = 'text'; label = p;
-      body = { mode: 'preview', prompt: p, art_style: $('#aiStyle').value, should_remesh: true, target_polycount: poly };
-      const neg = $('#aiNeg').value.trim();
-      if (neg) body.negative_prompt = neg;
-    } else {
-      if (!imageDataUrl) throw new Error('Bir görsel seçin');
-      kind = 'image'; label = 'Görselden model';
-      body = { image_url: imageDataUrl, should_remesh: true, target_polycount: poly, should_texture: tex, enable_pbr: tex };
+// Binary STL writer: input mm Y-up → output mm Z-up (3D printing convention)
+function writeStl(geo) {
+  const pos = geo.attributes.position.array, idx = geo.index ? geo.index.array : null;
+  const triCount = idx ? idx.length / 3 : pos.length / 9;
+  const buf = new ArrayBuffer(84 + triCount * 50), dv = new DataView(buf);
+  const hdr = 'Model Studyo - mm, Z-up';
+  for (let i = 0; i < hdr.length; i++) dv.setUint8(i, hdr.charCodeAt(i));
+  dv.setUint32(80, triCount, true);
+  const P = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+  let o = 84;
+  for (let t = 0; t < triCount; t++) {
+    for (let c = 0; c < 3; c++) {
+      const vi = idx ? idx[t * 3 + c] : t * 3 + c;
+      P[c * 3] = pos[vi * 3]; P[c * 3 + 1] = -pos[vi * 3 + 2]; P[c * 3 + 2] = pos[vi * 3 + 1];
     }
-    showProgress(true, 2, 'Görev gönderiliyor…');
-    const r = await api(ENDPOINT[kind], body);
-    const id = r.result;
-    LS.history = [{ id, kind, prompt: label, status: 'PENDING', created: Date.now(), autoRefine: kind === 'text' && tex }, ...LS.history];
-    renderHistory();
-    await poll(id, kind);
+    const ux = P[3] - P[0], uy = P[4] - P[1], uz = P[5] - P[2], vx = P[6] - P[0], vy = P[7] - P[1], vz = P[8] - P[2];
+    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const l = Math.hypot(nx, ny, nz) || 1;
+    dv.setFloat32(o, nx / l, true); dv.setFloat32(o + 4, ny / l, true); dv.setFloat32(o + 8, nz / l, true);
+    for (let k = 0; k < 9; k++) dv.setFloat32(o + 12 + k * 4, P[k], true);
+    o += 50;
+  }
+  return buf;
+}
+
+function showResult(geo, stl, label) {
+  geo.computeVertexNormals();
+  geo.computeBoundingBox();
+  resultGeo = geo; resultStl = stl;
+  if (resultObj?.parent) removeObject(resultObj, false);
+  const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: '#d9dde8', metalness: 0.05, roughness: 0.55 }));
+  mesh.name = label;
+  const sz = geo.boundingBox.getSize(new THREE.Vector3());
+  mesh.scale.setScalar(2 / Math.max(sz.x, sz.y, sz.z)); // display size; STL keeps real mm
+  resultObj = mesh;
+  addObject(mesh);
+  placeFree(mesh);
+  focusSelection();
+  const tris = geo.index ? geo.index.count / 3 : geo.attributes.position.count / 3;
+  $('#phStats').innerHTML = `<b>${label}</b><br>${Math.round(tris).toLocaleString('tr-TR')} üçgen · ` +
+    `${sz.x.toFixed(1)} × ${sz.z.toFixed(1)} × ${sz.y.toFixed(1)} mm (G × D × Y) · STL ${(stl.byteLength / 1048576).toFixed(1)} MB`;
+  $('#phResult').hidden = false;
+}
+
+let worker = null;
+function buildLocal() {
+  const payload = {};
+  for (const k of Object.keys(VIEW_NAMES)) {
+    const v = views[k];
+    if (!v) continue;
+    if (!v.mask) throw new Error(VIEW_NAMES[k] + ' görselinde nesne bulunamadı');
+    payload[k] = { mask: v.mask.mask, w: v.mask.w, h: v.mask.h, pad: v.mask.pad, mirror: v.mirror };
+  }
+  if (!(payload.front || payload.back)) throw new Error('Ön veya arka görsel ekleyin');
+  if (!(payload.left || payload.right)) throw new Error('Sol veya sağ görsel ekleyin');
+  return new Promise((resolve, reject) => {
+    worker?.terminate();
+    worker = new Worker('hull-worker.js');
+    worker.onmessage = e => {
+      const m = e.data;
+      if (m.type === 'progress') phProgress(true, m.pct, m.stage + '…');
+      else if (m.type === 'error') { reject(new Error(m.message)); worker.terminate(); }
+      else if (m.type === 'done') {
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(m.positions, 3));
+        geo.setIndex(new THREE.BufferAttribute(m.indices, 1));
+        resolve(geo); worker.terminate();
+      }
+    };
+    worker.onerror = e => reject(new Error(e.message || 'İşlem hatası'));
+    worker.postMessage({ views: payload, res: +$('#phRes').value, roundness: +$('#phRound').value,
+      smooth: +$('#phSmooth').value, heightMm: +$('#phHeight').value || 100 });
+  });
+}
+
+async function buildServer() {
+  let url = $('#srvUrl').value.trim().replace(/\/+$/, '');
+  if (!url) url = location.origin; // the server also hosts this app
+  const fd = new FormData();
+  let n = 0;
+  for (const k of ['front', 'back', 'left', 'right']) {
+    const v = views[k]; if (!v) continue;
+    let c = await loadImageCanvas(v.file, 1024);
+    if (v.mirror) { const m = document.createElement('canvas'); m.width = c.width; m.height = c.height; const g = m.getContext('2d'); g.scale(-1, 1); g.drawImage(c, -c.width, 0); c = m; }
+    fd.append(k, await new Promise(r => c.toBlob(r, 'image/png')), k + '.png'); n++;
+  }
+  if (!views.front) throw new Error('AI sunucusu için ön görsel gerekli');
+  fd.append('octree_resolution', $('#srvRes').value);
+  fd.append('steps', $('#srvSteps').value);
+  fd.append('height_mm', $('#phHeight').value || '100');
+  phProgress(true, 10, `${n} görsel sunucuya gönderildi, AI modeli üretiyor (1-3 dk)…`);
+  let fake = 10;
+  const tick = setInterval(() => { fake = Math.min(92, fake + 1.5); $('#phBar').style.width = fake + '%'; }, 1500);
+  try {
+    let res;
+    try { res = await fetch(url + '/generate', { method: 'POST', body: fd }); }
+    catch { throw new Error('Sunucuya bağlanılamadı. Adres doğru mu, sunucu açık mı?'); }
+    if (!res.ok) throw new Error('Sunucu hatası: ' + (await res.text()).slice(0, 200));
+    const stl = await res.arrayBuffer();
+    const geo = new STLLoader().parse(stl);      // mm, Z-up
+    geo.rotateX(-Math.PI / 2);                   // → Y-up for display
+    return { geo, stl };
+  } finally { clearInterval(tick); }
+}
+
+$('#btnBuild').onclick = async () => {
+  const btn = $('#btnBuild');
+  btn.disabled = true;
+  $('#phResult').hidden = true;
+  phProgress(true, 1, 'Başlıyor…');
+  try {
+    const t0 = performance.now();
+    if (engine === 'local') {
+      const geo = await buildLocal();
+      showResult(geo, writeStl(geo), 'Görselden model');
+    } else {
+      const { geo, stl } = await buildServer();
+      showResult(geo, stl, 'AI model');
+    }
+    phProgress(true, 100, `Hazır (${((performance.now() - t0) / 1000).toFixed(1)} sn)`);
+    setTimeout(() => phProgress(false), 2500);
   } catch (e) {
-    toast(e.message, 4500); showProgress(false);
+    console.error(e); phProgress(false); toast(e.message, 5000);
   } finally { btn.disabled = false; }
 };
 
-const polling = new Set();
-async function poll(id, kind) {
-  if (polling.has(id)) return;
-  polling.add(id);
-  try {
-    while (true) {
-      const t = await api(`${ENDPOINT[kind]}/${id}`);
-      const pct = t.progress ?? 0;
-      const step = kind === 'refine' ? 'Doku işleniyor' : 'Model oluşturuluyor';
-      showProgress(true, Math.max(3, pct), `${step}… %${pct}`);
-      updateHistory(id, { status: t.status, progress: pct, thumb: t.thumbnail_url || undefined });
-      if (t.status === 'SUCCEEDED') {
-        const glb = t.model_urls?.glb;
-        updateHistory(id, { glb, thumb: t.thumbnail_url });
-        showProgress(true, 100, 'Hazır!');
-        const item = LS.history.find(x => x.id === id);
-        if (item?.autoRefine) {
-          updateHistory(id, { autoRefine: false });
-          if (glb) await loadRemote(glb, item.prompt + ' (taslak)');
-          await startRefine(id, item.prompt);
-        } else if (glb) {
-          await loadRemote(glb, item?.prompt || 'AI model');
-          setTimeout(() => showProgress(false), 1500);
-        }
-        break;
-      }
-      if (t.status === 'FAILED' || t.status === 'CANCELED' || t.status === 'EXPIRED') {
-        throw new Error('Üretim başarısız: ' + (t.task_error?.message || t.status));
-      }
-      await new Promise(r => setTimeout(r, 4000));
-    }
-  } catch (e) {
-    toast(e.message, 5000); showProgress(false);
-    updateHistory(id, { status: 'FAILED' });
-  } finally { polling.delete(id); }
-}
-
-async function startRefine(previewId, prompt) {
-  showProgress(true, 2, 'Doku adımı başlatılıyor…');
-  const r = await api(ENDPOINT.refine, { mode: 'refine', preview_task_id: previewId, enable_pbr: true });
-  const id = r.result;
-  LS.history = [{ id, kind: 'refine', prompt: prompt + ' (dokulu)', status: 'PENDING', created: Date.now() }, ...LS.history];
-  renderHistory();
-  await poll(id, 'refine');
-}
-
-async function fetchAsset(url) {
-  try {
-    const r = await fetch(url);
-    if (!r.ok) throw new Error(r.status);
-    return await r.arrayBuffer();
-  } catch (e) {
-    if (!LS.proxy) throw new Error('Model indirilemedi (CORS). Proxy tanımlayın.');
-    const r = await fetch(LS.proxy.replace(/\/+$/, '') + '/fetch?url=' + encodeURIComponent(url));
-    if (!r.ok) throw new Error('Model indirilemedi');
-    return await r.arrayBuffer();
-  }
-}
-
-async function loadRemote(url, name) {
-  busy(true, 'Model sahneye yükleniyor…');
-  try {
-    const buf = await fetchAsset(url);
-    const obj = await loadModelBuffer(buf, 'm.glb');
-    obj.name = name.slice(0, 40);
-    fitObject(obj);
-    // offset next to existing objects
-    if (world.children.length) {
-      const box = new THREE.Box3().setFromObject(world);
-      obj.position.x += box.max.x + 1.2;
-    }
-    addObject(obj);
-    focusSelection();
-    toast('Model sahneye eklendi');
-    return obj;
-  } catch (e) { toast(e.message, 5000); }
-  finally { busy(false); }
-}
-
-const STATUS_TR = { PENDING: 'Sırada', IN_PROGRESS: 'Üretiliyor', SUCCEEDED: 'Hazır', FAILED: 'Başarısız', CANCELED: 'İptal', EXPIRED: 'Süresi doldu' };
-function renderHistory() {
-  const ul = $('#aiHistory');
-  const h = LS.history;
-  ul.innerHTML = h.length ? '' : '<li class="muted small">Henüz üretim yok.</li>';
-  h.forEach(item => {
-    const li = document.createElement('li');
-    const img = document.createElement('img');
-    if (item.thumb) img.src = item.thumb;
-    const meta = document.createElement('div'); meta.className = 'meta';
-    const title = document.createElement('div'); title.textContent = item.prompt;
-    const st = document.createElement('div'); st.className = 'small muted';
-    st.textContent = `${STATUS_TR[item.status] || item.status}${item.status === 'IN_PROGRESS' ? ' %' + (item.progress || 0) : ''} · ${new Date(item.created).toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' })}`;
-    meta.append(title, st);
-    const acts = document.createElement('div'); acts.className = 'acts';
-    if (item.glb) {
-      const add = document.createElement('button'); add.textContent = 'Sahneye ekle';
-      add.onclick = () => loadRemote(item.glb, item.prompt);
-      acts.append(add);
-      if (item.kind === 'text') {
-        const ref = document.createElement('button'); ref.textContent = 'Doku ekle';
-        ref.onclick = () => startRefine(item.id, item.prompt).catch(e => toast(e.message, 4500));
-        acts.append(ref);
-      }
-    }
-    const del = document.createElement('button'); del.textContent = '✕';
-    del.onclick = () => { LS.history = LS.history.filter(x => x.id !== item.id); renderHistory(); };
-    acts.append(del);
-    li.append(img, meta, acts);
-    ul.appendChild(li);
-  });
-}
-renderHistory();
-// resume unfinished tasks after a reload
-LS.history.filter(x => x.status === 'PENDING' || x.status === 'IN_PROGRESS').forEach(x => poll(x.id, x.kind));
+$('#btnStl').onclick = () => resultStl && download(new Blob([resultStl], { type: 'model/stl' }), 'model.stl');
+$('#btnObjRes').onclick = () => {
+  if (!resultGeo) return;
+  const m = new THREE.Mesh(resultGeo);  // OBJ: mm, Y-up
+  download(new Blob([new OBJExporter().parse(m)], { type: 'text/plain' }), 'model.obj');
+};
 
 /* =========================================================
-   Starter scene + PWA
+   PWA
    ========================================================= */
-(async () => {
-  await addPrimitive('box', false);
-  undoStack.length = 0;
-  select(null);
-})();
-
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }

@@ -1,0 +1,9 @@
+# Server extras (install AFTER Hunyuan3D-2, see README.md)
+fastapi
+uvicorn
+python-multipart
+trimesh
+networkx
+scipy
+pillow
+numpy

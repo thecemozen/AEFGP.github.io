@@ -24,8 +24,8 @@
 <header id="topbar">
   <div class="brand">◆ Model Stüdyo</div>
   <nav class="tabs">
-    <button class="tab active" data-tab="model">Modelle</button>
-    <button class="tab" data-tab="ai">AI ile Üret</button>
+    <button class="tab active" data-tab="photo">Görselden 3D</button>
+    <button class="tab" data-tab="model">Modelle</button>
     <button class="tab" data-tab="scene">Dosya</button>
   </nav>
 </header>
@@ -49,7 +49,7 @@
   <button id="panelHandle" aria-label="Paneli aç/kapat"><span></span><em>Araçlar ▲</em></button>
 
   <!-- ===== MODELLE ===== -->
-  <section class="pane active" data-pane="model">
+  <section class="pane" data-pane="model">
     <h3>Şekil ekle</h3>
     <div class="grid prims">
       <button data-prim="box">▢<span>Küp</span></button>
@@ -93,69 +93,81 @@
     <ul id="outliner"></ul>
   </section>
 
-  <!-- ===== AI ===== -->
-  <section class="pane" data-pane="ai">
-    <p class="muted small">Metinden veya fotoğraftan 3D model üretir. <a href="https://www.meshy.ai/api" target="_blank" rel="noopener">Meshy API</a> anahtarınızı kullanır — anahtar sadece bu cihazda saklanır.</p>
-    <label class="row col">API anahtarı
-      <input id="aiKey" type="password" placeholder="msy_..." autocomplete="off">
-    </label>
-    <div class="btns">
-      <button id="btnTestKey" class="ghost">Test anahtarı kullan</button>
-      <button id="btnSaveKey">Kaydet</button>
+  <!-- ===== GÖRSELDEN 3D ===== -->
+  <section class="pane active" data-pane="photo">
+    <p class="muted small">Nesnenin <b>ön, arka, sol ve sağ</b> fotoğraflarını verin; 3D modeli çıkarıp <b>STL</b> olarak indirin. Ücretsiz, hesap gerekmez, fotoğraflar cihazınızdan çıkmaz.</p>
+
+    <div class="seg" id="engineSeg">
+      <button class="active" data-engine="local">Bu cihazda</button>
+      <button data-engine="server">Kendi AI sunucum</button>
     </div>
-    <details>
-      <summary>Gelişmiş: proxy (CORS hatası alırsanız)</summary>
-      <label class="row col">Proxy adresi
-        <input id="aiProxy" type="url" placeholder="https://benim-proxy.workers.dev">
-      </label>
-      <p class="muted small">Tarayıcı doğrudan bağlanamazsa klasördeki <code>proxy-worker.js</code> dosyasını Cloudflare Workers'a yükleyip adresini buraya yazın.</p>
+
+    <div class="views">
+      <div class="slot" data-view="front"><label><input type="file" accept="image/*" hidden><canvas></canvas><span class="ph">＋<br>Ön</span></label><div class="slot-bar"><b>Ön</b><button data-act="mirror" title="Aynala">⇋</button><button data-act="clear" title="Kaldır">✕</button></div></div>
+      <div class="slot" data-view="back"><label><input type="file" accept="image/*" hidden><canvas></canvas><span class="ph">＋<br>Arka</span></label><div class="slot-bar"><b>Arka</b><button data-act="mirror" title="Aynala">⇋</button><button data-act="clear" title="Kaldır">✕</button></div></div>
+      <div class="slot" data-view="left"><label><input type="file" accept="image/*" hidden><canvas></canvas><span class="ph">＋<br>Sol</span></label><div class="slot-bar"><b>Sol</b><button data-act="mirror" title="Aynala">⇋</button><button data-act="clear" title="Kaldır">✕</button></div></div>
+      <div class="slot" data-view="right"><label><input type="file" accept="image/*" hidden><canvas></canvas><span class="ph">＋<br>Sağ</span></label><div class="slot-bar"><b>Sağ</b><button data-act="mirror" title="Aynala">⇋</button><button data-act="clear" title="Kaldır">✕</button></div></div>
+      <div class="slot local-only" data-view="top"><label><input type="file" accept="image/*" hidden><canvas></canvas><span class="ph">＋<br>Üst<br><small>(isteğe bağlı)</small></span></label><div class="slot-bar"><b>Üst</b><button data-act="mirror" title="Aynala">⇋</button><button data-act="clear" title="Kaldır">✕</button></div></div>
+    </div>
+    <details class="tips">
+      <summary>Nasıl çekmeliyim?</summary>
+      <ul class="small">
+        <li>Düz, sade ve nesneden farklı renkte bir arka plan (beyaz duvar, karton).</li>
+        <li>Her fotoğrafı aynı yükseklikten, nesneye dik açıyla ve biraz uzaktan (zoom yaparak) çekin.</li>
+        <li><b>Sol</b> = nesneye önden bakarken sizin solunuzdan görünüş. Ters çıkarsa ⇋ ile aynalayın.</li>
+        <li>Önizlemede nesne parlak, arka plan karartılmış görünmeli; değilse hassasiyeti ayarlayın.</li>
+      </ul>
     </details>
 
-    <div class="seg" id="aiModeSeg">
-      <button class="active" data-ai="text">Metinden</button>
-      <button data-ai="image">Görselden</button>
+    <div class="local-only">
+      <label class="row">Arka plan hassasiyeti <input id="phThr" type="range" min="5" max="140" value="40"></label>
+      <label class="row check"><input id="phHoles" type="checkbox"> İç boşlukları da arka plan say</label>
+      <label class="row">Kalite
+        <select id="phRes">
+          <option value="96">Hızlı</option>
+          <option value="160" selected>Normal</option>
+          <option value="224">Yüksek</option>
+          <option value="300">Çok yüksek (yavaş)</option>
+        </select>
+      </label>
+      <label class="row">Köşeli ↔ Yuvarlak <input id="phRound" type="range" min="0" max="1" step="0.05" value="1"></label>
+      <label class="row">Pürüzsüzlük <input id="phSmooth" type="range" min="0" max="40" step="1" value="16"></label>
     </div>
 
-    <div id="aiText">
-      <label class="row col">Ne üretelim?
-        <textarea id="aiPrompt" rows="3" placeholder="ör. ahşap bir hazine sandığı, altın süslemeli"></textarea>
+    <div class="server-only" hidden>
+      <label class="row col">Sunucu adresi
+        <input id="srvUrl" type="url" placeholder="http://192.168.1.20:8000 veya https://xxx.trycloudflare.com">
       </label>
-      <label class="row col">İstemeden (negatif)
-        <input id="aiNeg" type="text" placeholder="ör. bulanık, düşük kalite">
+      <p class="muted small">Kendi bilgisayarınızda (NVIDIA ekran kartı) veya ücretsiz Google Colab'da çalışan açık kaynak AI (Hunyuan3D-2mv). Kurulum: <code>model-studio/server/README.md</code></p>
+      <label class="row">Kalite
+        <select id="srvRes">
+          <option value="256">Normal</option>
+          <option value="380" selected>Yüksek</option>
+          <option value="512">Çok yüksek</option>
+        </select>
       </label>
-      <label class="row">Stil
-        <select id="aiStyle">
-          <option value="realistic">Gerçekçi</option>
-          <option value="sculpture">Heykel</option>
+      <label class="row">Adım sayısı
+        <select id="srvSteps">
+          <option value="30" selected>30 (hızlı)</option>
+          <option value="50">50 (daha iyi)</option>
         </select>
       </label>
     </div>
 
-    <div id="aiImage" hidden>
-      <label class="drop" id="imgDrop">
-        <input id="aiImgFile" type="file" accept="image/png,image/jpeg,image/webp" hidden>
-        <img id="aiImgPrev" alt="" hidden>
-        <span id="aiImgHint">Fotoğraf seç / sürükle</span>
-      </label>
+    <label class="row">Gerçek yükseklik (mm) <input id="phHeight" type="number" min="1" step="1" value="100"></label>
+
+    <button id="btnBuild" class="primary wide">⚙ 3D Model Oluştur</button>
+    <div id="phProgress" hidden>
+      <div class="bar"><div id="phBar"></div></div>
+      <div id="phStatus" class="small muted"></div>
     </div>
-
-    <label class="row">Poligon hedefi
-      <select id="aiPoly">
-        <option value="10000">10k (hafif)</option>
-        <option value="30000" selected>30k</option>
-        <option value="100000">100k (detaylı)</option>
-      </select>
-    </label>
-    <label class="row check"><input id="aiPbr" type="checkbox" checked> PBR doku</label>
-
-    <button id="btnGenerate" class="primary wide">✨ Üret</button>
-    <div id="aiProgress" hidden>
-      <div class="bar"><div id="aiBar"></div></div>
-      <div id="aiStatus" class="small muted"></div>
+    <div id="phResult" class="result" hidden>
+      <div id="phStats" class="small"></div>
+      <div class="btns">
+        <button id="btnStl" class="primary">⬇ STL indir</button>
+        <button id="btnObjRes">OBJ indir</button>
+      </div>
     </div>
-
-    <h3>Geçmiş</h3>
-    <ul id="aiHistory"></ul>
   </section>
 
   <!-- ===== DOSYA ===== -->
